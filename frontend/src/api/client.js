@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://cmsce-complaint.onrender.com/api';
 
 function getAuthToken() {
   if (typeof window === 'undefined') return null;
