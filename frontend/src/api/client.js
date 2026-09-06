@@ -1,4 +1,5 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://cmsce-complaint.onrender.com/api';
+const rawUrl = import.meta.env.VITE_API_BASE_URL || 'https://cmsce-complaint.onrender.com';
+const BASE_URL = rawUrl.replace(/\/api\/?$/, '');
 
 function getAuthToken() {
   if (typeof window === 'undefined') return null;
@@ -28,10 +29,14 @@ async function request(endpoint, options = {}) {
   };
 
   // Support leading slashes or full URLs
+  let cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  if (cleanEndpoint.startsWith('/api/')) {
+    cleanEndpoint = cleanEndpoint.replace('/api', '');
+  }
+
   let url = endpoint.startsWith('http')
     ? endpoint
-    : `${BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
-
+    : `${BASE_URL}/api${cleanEndpoint}`;
   try {
     const res = await fetch(url, {
       ...options,
