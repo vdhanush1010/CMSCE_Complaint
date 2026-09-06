@@ -1,0 +1,41 @@
+<svg viewBox="0 0 300 280" width="300" height="280" xmlns="http://www.w3.org/2000/svg">
+  <!-- Yellow Top Tips -->
+  <g fill="#E5A100">
+    <!-- Left Yellow Tip: angled top slanting inward -->
+    <path d="M 130 85 L 130 148 L 147 132 L 147 60 Z" />
+    <!-- Right Yellow Tip: angled top slanting inward -->
+    <path d="M 170 85 L 170 148 L 153 132 L 153 60 Z" />
+  </g>
+
+  <!-- Green Lotus Body -->
+  <g fill="#084325">
+    <!-- Main Green Lotus Silhouette with inner cutout teardrop and petal curves -->
+    <path fill-rule="evenodd" clip-rule="evenodd" d="
+      M 150 240
+      C 115 240 70 220 40 175
+      C 20 145 22 110 40 90
+      C 55 73 78 82 85 105
+      C 90 120 85 145 70 165
+      C 82 195 110 208 135 208
+      C 125 185 110 160 102 135
+      C 92 105 105 80 128 92
+      C 138 97 145 110 145 125
+      C 145 155 130 175 140 188
+      C 145 195 150 195 150 195
+      C 150 195 155 195 160 188
+      C 170 175 155 155 155 125
+      C 155 110 162 97 172 92
+      C 195 80 208 105 198 135
+      C 190 160 175 185 165 208
+      C 190 208 218 195 230 165
+      C 215 145 210 120 215 105
+      C 222 82 245 73 260 90
+      C 278 110 280 145 260 175
+      C 230 220 185 240 150 240 Z
+      
+      M 150 135
+      C 142 150 142 170 150 182
+      C 158 170 158 150 150 135 Z
+    " />
+  </g>
+</svg>

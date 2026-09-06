@@ -1,0 +1,27 @@
+{
+  "name": "cmsce-complaint-system",
+  "version": "1.2.0",
+  "description": "CMSCE AI-Powered Complaint Management System (Dual Folder Architecture)",
+  "private": true,
+  "scripts": {
+    "install:all": "npm --prefix backend install && npm --prefix frontend install",
+    "seed": "npm --prefix backend run seed",
+    "start:backend": "npm --prefix backend start",
+    "start:frontend": "npm --prefix frontend run dev",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev": "concurrently --kill-others-on-fail --prefix \"[{name}]\" --names \"BACKEND,FRONTEND\" -c \"bgBlue.bold,bgGreen.bold\" \"npm run dev:backend\" \"npm run dev:frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "keywords": [
+    "cmsce",
+    "complaints",
+    "ai-triage",
+    "mern",
+    "full-stack"
+  ],
+  "author": "CMSCE Systems Engineering",
+  "license": "ISC"
+}

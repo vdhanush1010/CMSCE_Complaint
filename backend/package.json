@@ -1,0 +1,30 @@
+{
+  "name": "cmsce-complaint-backend",
+  "version": "1.0.0",
+  "description": "CMSCE AI-Powered Complaint Management System Backend Engine",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed": "node src/scripts/seed.js"
+  },
+  "type": "module",
+  "dependencies": {
+    "@google/genai": "^2.21.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.9.2"
+  },
+  "keywords": [
+    "complaint-management",
+    "express",
+    "mongoose",
+    "genai",
+    "cmsce"
+  ],
+  "author": "CMSCE Systems Engineering",
+  "license": "ISC"
+}
