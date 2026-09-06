@@ -80,8 +80,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`
   ======================================================
   🎓 CMSCE AI-Powered Grievance Hub — Backend Engine
   🚀 Server running on http://localhost:${PORT}
@@ -89,4 +90,7 @@ app.listen(PORT, () => {
   ⚡ Health Check: http://localhost:${PORT}/api/health
   ======================================================
   `);
-});
+  });
+}
+
+export default app;

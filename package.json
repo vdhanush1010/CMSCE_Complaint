@@ -4,6 +4,8 @@
   "description": "CMSCE AI-Powered Complaint Management System (Dual Folder Architecture)",
   "private": true,
   "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "start": "cd backend && npm start",
     "install:all": "npm --prefix backend install && npm --prefix frontend install",
     "seed": "npm --prefix backend run seed",
     "start:backend": "npm --prefix backend start",
