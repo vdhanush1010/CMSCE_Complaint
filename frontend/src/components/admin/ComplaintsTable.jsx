@@ -1,10 +1,11 @@
 import React from 'react';
-import { AlertCircle, Clock } from 'lucide-react';
+import { AlertCircle, Clock, Star, Scale, Eye, CheckCircle2 } from 'lucide-react';
 
 export default function ComplaintsTable({ 
   complaints = [], 
   selectedComplaintId, 
-  onSelectComplaint 
+  onSelectComplaint,
+  onViewFeedback
 }) {
   
   const getDeptLabel = (code) => {
@@ -35,34 +36,59 @@ export default function ComplaintsTable({
     }
   };
 
-  const getStatusStyle = (status) => {
-    switch (status) {
-      case 'Submitted':
-      case 'SUBMITTED':
-      case 'AI Analysed':
-      case 'Assigned':
-        return 'bg-blue-100 text-blue-800 border border-blue-200';
-      case 'In Progress':
-      case 'IN_PROGRESS':
-        return 'bg-amber-100 text-amber-800 border border-amber-200';
-      case 'Resolution Pending Verification':
-      case 'PENDING_VERIFICATION':
-        return 'bg-orange-100 text-orange-800 border border-orange-200';
-      case 'Resolved':
-      case 'RESOLVED':
-        return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
-      case 'Closed':
-      case 'CLOSED':
-        return 'bg-slate-200 text-slate-700 border border-slate-300 font-semibold';
-      case 'Appealed':
-      case 'APPEALED':
-        return 'bg-amber-100 text-amber-900 border border-amber-300 font-bold';
-      case 'Reopened':
-      case 'REOPENED':
-        return 'bg-rose-100 text-rose-800 border border-rose-200 font-bold';
-      default:
-        return 'bg-slate-100 text-slate-800 border border-slate-200';
+  const getStageBadge = (stage, status) => {
+    const isAppealed = status === 'APPEALED' || status === 'Appealed';
+    if (isAppealed) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-black bg-rose-100 text-rose-800 border border-rose-300 px-2.5 py-1 rounded-full animate-pulse">
+          <Scale className="w-3 h-3 text-rose-600" />
+          APPEALED (Reset Stage 1)
+        </span>
+      );
     }
+
+    const s = (stage || status || '').toUpperCase();
+    if (s.includes('RESOLV') || s.includes('CLOSE')) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-1 rounded-full">
+          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+          Stage 6: Resolved
+        </span>
+      );
+    }
+    if (s.includes('VERIF') || s.includes('PENDING')) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-orange-100 text-orange-800 border border-orange-300 px-2.5 py-1 rounded-full">
+          Stage 5: Pending Verify
+        </span>
+      );
+    }
+    if (s.includes('IN_PROGRESS') || s === 'IN PROGRESS') {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 px-2.5 py-1 rounded-full">
+          Stage 4: In Progress
+        </span>
+      );
+    }
+    if (s.includes('ASSIGN')) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-300 px-2.5 py-1 rounded-full">
+          Stage 3: Assigned
+        </span>
+      );
+    }
+    if (s.includes('AI') || s.includes('ANALYSE')) {
+      return (
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-300 px-2.5 py-1 rounded-full">
+          Stage 2: AI Analysed
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-300 px-2.5 py-1 rounded-full">
+        Stage 1: Submitted
+      </span>
+    );
   };
 
   const getSLATimerBadge = (hoursLeft, isOverdue) => {
@@ -91,66 +117,107 @@ export default function ComplaintsTable({
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex-1">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex-1 w-full">
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold text-xs uppercase tracking-wider">
-              <th className="px-6 py-4">ID</th>
-              <th className="px-6 py-4">Category</th>
-              <th className="px-6 py-4">Description</th>
-              <th className="px-6 py-4">Assigned Dept</th>
-              <th className="px-6 py-4">Priority</th>
-              <th className="px-6 py-4">SLA Timer</th>
-              <th className="px-6 py-4">Status</th>
+              <th className="px-5 py-3.5">Ticket ID</th>
+              <th className="px-5 py-3.5">Category & Subject</th>
+              <th className="px-5 py-3.5">Dept</th>
+              <th className="px-5 py-3.5">Priority</th>
+              <th className="px-5 py-3.5">Stage & Workflow</th>
+              <th className="px-5 py-3.5">SLA Timer</th>
+              <th className="px-5 py-3.5 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-sm">
             {complaints.length === 0 ? (
               <tr>
-                <td colSpan="7" className="px-6 py-10 text-center text-slate-400 font-medium">
-                  No complaints found matching criteria.
+                <td colSpan="7" className="px-6 py-12 text-center text-slate-400 font-medium">
+                  No grievances matching the selected filters.
                 </td>
               </tr>
             ) : (
               complaints.map((complaint) => {
                 const isSelected = selectedComplaintId === complaint.id;
                 const priorityInfo = getPriorityStyle(complaint.priority);
-                
+                const hasFeedback = Boolean(
+                  complaint.feedback && (complaint.feedback.rating > 0 || complaint.feedback.comments)
+                );
+                const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(complaint.status) || complaint.stage === 'RESOLVED';
+                const appealCycle = complaint.appeal?.cycle || (Array.isArray(complaint.appealHistory) ? complaint.appealHistory.length : 0);
+
                 return (
                   <tr
                     key={complaint.id}
                     onClick={() => onSelectComplaint(complaint)}
                     className={`hover:bg-slate-50 cursor-pointer transition-colors ${
                       isSelected 
-                        ? 'bg-emerald-50/50 hover:bg-emerald-50' 
+                        ? 'bg-emerald-50/70 hover:bg-emerald-50' 
                         : ''
                     }`}
                   >
-                    <td className="px-6 py-4 font-mono text-slate-500 font-semibold">
-                      {complaint.id}
+                    <td className="px-5 py-3.5 font-mono text-slate-600 font-bold text-xs">
+                      <div className="flex items-center gap-1.5">
+                        <span>{complaint.id}</span>
+                        {appealCycle > 0 && (
+                          <span className="text-[9px] font-black bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded border border-amber-300">
+                            C#{appealCycle}
+                          </span>
+                        )}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 font-bold text-slate-800">
-                      {complaint.category}
+                    <td className="px-5 py-3.5 max-w-xs">
+                      <div className="font-bold text-slate-800 truncate" title={complaint.category}>
+                        {complaint.category}
+                      </div>
+                      <div className="text-xs text-slate-500 truncate" title={complaint.description}>
+                        {complaint.description}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 text-slate-500 max-w-xs truncate">
-                      {complaint.description}
-                    </td>
-                    <td className="px-6 py-4 font-medium text-slate-700">
+                    <td className="px-5 py-3.5 font-medium text-slate-700 text-xs">
                       {getDeptLabel(complaint.assignedDept)}
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${priorityInfo.bgClass}`}>
+                    <td className="px-5 py-3.5">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${priorityInfo.bgClass}`}>
                         {priorityInfo.label}
                       </span>
                     </td>
-                    <td className="px-6 py-4">
+                    <td className="px-5 py-3.5">
+                      {getStageBadge(complaint.stage, complaint.status)}
+                    </td>
+                    <td className="px-5 py-3.5">
                       {getSLATimerBadge(complaint.slaHoursLeft, complaint.isSlaOverdue)}
                     </td>
-                    <td className="px-6 py-4">
-                      <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${getStatusStyle(complaint.status)}`}>
-                        {complaint.status}
-                      </span>
+                    <td className="px-5 py-3.5 text-right">
+                      <div className="inline-flex items-center gap-2 justify-end">
+                        {isResolved && hasFeedback && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onViewFeedback) onViewFeedback(complaint);
+                            }}
+                            className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                            title="View Student Feedback & Rating"
+                          >
+                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                            <span>{complaint.feedback.rating}★ Feedback</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectComplaint(complaint);
+                          }}
+                          className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Manage</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

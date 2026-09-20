@@ -76,6 +76,13 @@ const complaintSchema = new mongoose.Schema(
       ],
       default: 'Submitted'
     },
+    stage: {
+      type: String,
+      enum: ['SUBMITTED', 'AI_ANALYSED', 'ASSIGNED', 'IN_PROGRESS', 'PENDING_VERIFICATION', 'RESOLVED'],
+      default: 'SUBMITTED',
+      uppercase: true,
+      trim: true
+    },
     is_anonymous: {
       type: Boolean,
       default: false
@@ -132,11 +139,7 @@ const complaintSchema = new mongoose.Schema(
     },
     attachments: [
       {
-        fileName: { type: String, trim: true },
-        fileData: { type: String },
-        fileType: { type: String, trim: true },
-        fileSize: { type: Number },
-        uploadedAt: { type: Date, default: Date.now }
+        type: mongoose.Schema.Types.Mixed
       }
     ],
     proofs: [
@@ -147,13 +150,14 @@ const complaintSchema = new mongoose.Schema(
       }
     ],
     resolutionProof: {
-      fileName: { type: String, trim: true },
-      fileData: { type: String },
-      fileType: { type: String, trim: true },
-      fileSize: { type: Number },
-      uploadedAt: { type: Date, default: Date.now }
+      type: mongoose.Schema.Types.Mixed,
+      default: null
     },
     resolution_proof_url: {
+      type: String,
+      default: ''
+    },
+    resolutionNotes: {
       type: String,
       default: ''
     },
@@ -187,7 +191,7 @@ const complaintSchema = new mongoose.Schema(
       }
     ],
     feedback: {
-      rating: { type: Number, min: 0, max: 5, default: 0 },
+      rating: { type: Number, min: 1, max: 5 },
       comments: { type: String, default: '' },
       selected_tags: [String],
       reopen_requested: { type: Boolean, default: false },
@@ -202,7 +206,15 @@ const complaintSchema = new mongoose.Schema(
         fileType: String
       },
       appealedAt: { type: Date }
-    }
+    },
+    appealHistory: [
+      {
+        reason: { type: String, required: true },
+        appealedAt: { type: Date, default: Date.now },
+        previousResolutionProof: { type: mongoose.Schema.Types.Mixed },
+        cycle: { type: Number, default: 1 }
+      }
+    ]
   },
   {
     collection: 'complaints',
@@ -217,7 +229,38 @@ const complaintSchema = new mongoose.Schema(
   }
 );
 
-// Pre-save SLA deadline, breach computation, and departmentCode sync
+// Helper to map status to 6-stage format
+const STATUS_TO_STAGE = {
+  'Submitted': 'SUBMITTED',
+  'SUBMITTED': 'SUBMITTED',
+  'AI Analysed': 'AI_ANALYSED',
+  'AI_ANALYSED': 'AI_ANALYSED',
+  'Assigned': 'ASSIGNED',
+  'ASSIGNED': 'ASSIGNED',
+  'In Progress': 'IN_PROGRESS',
+  'IN_PROGRESS': 'IN_PROGRESS',
+  'Resolution Pending Verification': 'PENDING_VERIFICATION',
+  'PENDING_VERIFICATION': 'PENDING_VERIFICATION',
+  'Resolved': 'RESOLVED',
+  'RESOLVED': 'RESOLVED',
+  'Closed': 'RESOLVED',
+  'CLOSED': 'RESOLVED',
+  'Reopened': 'IN_PROGRESS',
+  'REOPENED': 'IN_PROGRESS',
+  'APPEALED': 'SUBMITTED',
+  'Appealed': 'SUBMITTED'
+};
+
+const STAGE_TO_STATUS = {
+  'SUBMITTED': 'Submitted',
+  'AI_ANALYSED': 'AI Analysed',
+  'ASSIGNED': 'Assigned',
+  'IN_PROGRESS': 'In Progress',
+  'PENDING_VERIFICATION': 'Resolution Pending Verification',
+  'RESOLVED': 'Resolved'
+};
+
+// Pre-save SLA deadline, breach computation, departmentCode sync, and stage-status sync
 complaintSchema.pre('save', function (next) {
   if (this.department && !this.departmentCode) {
     this.departmentCode = this.department;
@@ -228,6 +271,21 @@ complaintSchema.pre('save', function (next) {
   if (!this.student && this.studentId) {
     this.student = this.studentId;
   }
+
+  // Synchronize resolutionNotes and resolution_notes
+  if (this.resolutionNotes && !this.resolution_notes) {
+    this.resolution_notes = this.resolutionNotes;
+  } else if (this.resolution_notes && !this.resolutionNotes) {
+    this.resolutionNotes = this.resolution_notes;
+  }
+
+  // Synchronize stage and status
+  if (!this.stage && this.status) {
+    this.stage = STATUS_TO_STAGE[this.status] || 'SUBMITTED';
+  } else if (this.stage && !this.status) {
+    this.status = STAGE_TO_STATUS[this.stage] || 'Submitted';
+  }
+
   if (!this.sla_deadline_at && this.sla_hours) {
     const deadline = new Date(this.createdAt || Date.now());
     deadline.setHours(deadline.getHours() + this.sla_hours);
@@ -248,3 +306,4 @@ complaintSchema.pre('save', function (next) {
 });
 
 export const Complaint = mongoose.model('Complaint', complaintSchema);
+export default Complaint;

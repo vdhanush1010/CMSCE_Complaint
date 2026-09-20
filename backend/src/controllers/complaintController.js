@@ -121,7 +121,7 @@ export async function reopenComplaint(req, res) {
  */
 export async function getComplaints(req, res) {
   try {
-    const { department, status, search, student_id } = req.query;
+    const { department, status, stage, search, student_id } = req.query;
 
     const mapComplaint = (item, now) => {
       const deadline = item.slaExtendedUntil || item.sla_deadline_at;
@@ -150,6 +150,9 @@ export async function getComplaints(req, res) {
 
       if (status && status !== 'ALL' && status !== 'all') {
         filter.status = status;
+      }
+      if (stage && stage !== 'ALL' && stage !== 'all') {
+        filter.stage = stage.toUpperCase();
       }
 
       if (search && search.trim()) {
@@ -186,6 +189,9 @@ export async function getComplaints(req, res) {
       if (status && status !== 'ALL' && status !== 'all') {
         filter.status = status;
       }
+      if (stage && stage !== 'ALL' && stage !== 'all') {
+        filter.stage = stage.toUpperCase();
+      }
 
       if (search && search.trim()) {
         const q = search.trim();
@@ -217,6 +223,9 @@ export async function getComplaints(req, res) {
 
     if (status && status !== 'ALL' && status !== 'all') {
       filter.status = status;
+    }
+    if (stage && stage !== 'ALL' && stage !== 'all') {
+      filter.stage = stage.toUpperCase();
     }
 
     if (search && search.trim()) {
@@ -281,13 +290,27 @@ export async function appealComplaint(req, res) {
     const oldStatus = complaint.status;
     const now = new Date();
 
-    // Transition to APPEALED
+    // Transition to APPEALED & reset stage to SUBMITTED
+    const nextCycle = (Array.isArray(complaint.appealHistory) ? complaint.appealHistory.length : 0) + 1;
+    const previousResolutionProof = complaint.resolutionProof || complaint.resolution_proof_url || null;
+
     complaint.status = 'APPEALED';
+    complaint.stage = 'SUBMITTED';
+
+    if (!complaint.appealHistory) complaint.appealHistory = [];
+    complaint.appealHistory.push({
+      reason: explanation,
+      appealedAt: now,
+      previousResolutionProof: previousResolutionProof,
+      cycle: nextCycle
+    });
+
     complaint.appeal = {
       isAppealed: true,
       reason: explanation,
       proof: proof || null,
-      appealedAt: now
+      appealedAt: now,
+      cycle: nextCycle
     };
 
     if (!complaint.timeline) complaint.timeline = [];
@@ -295,7 +318,7 @@ export async function appealComplaint(req, res) {
       status: 'APPEALED',
       changedBy: studentName,
       role: 'STUDENT',
-      remarks: explanation,
+      remarks: `Appeal Cycle #${nextCycle}: ${explanation}`,
       timestamp: now
     });
 
@@ -304,7 +327,7 @@ export async function appealComplaint(req, res) {
       old_status: oldStatus,
       new_status: 'APPEALED',
       changed_by_name: studentName,
-      remarks: `Official Appeal Filed: ${explanation}`,
+      remarks: `Official Appeal Filed (Cycle #${nextCycle}): ${explanation}`,
       timestamp: now
     });
 
@@ -312,7 +335,7 @@ export async function appealComplaint(req, res) {
 
     return res.json({
       success: true,
-      message: `Appeal for grievance #${complaint.ticket_id} submitted successfully to College Administration for arbitration.`,
+      message: `Appeal (Cycle #${nextCycle}) for grievance #${complaint.ticket_id} submitted successfully.`,
       complaint: complaint.toJSON()
     });
   } catch (err) {

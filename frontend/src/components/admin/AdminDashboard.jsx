@@ -83,12 +83,20 @@ export default function AdminDashboard({ onLogout }) {
             assignedDept: item.assigned_department_code || item.department || 'CANTEEN',
             priority: (item.priority || 'MEDIUM').toUpperCase(),
             status: item.status || 'Submitted',
+            stage: item.stage || (item.status === 'Resolved' ? 'RESOLVED' : item.status === 'In Progress' ? 'IN_PROGRESS' : 'SUBMITTED'),
             slaHoursLeft: diffHours,
             isSlaOverdue: Boolean(item.is_sla_breached) || diffHours < 0,
             studentName: item.is_anonymous ? 'Anonymous' : (item.student_name || 'Student User'),
             studentRoll: item.student_roll || '2026-STU',
             routingReasoning: item.ai_routing_reasoning || 'AI routing engine processed ticket.',
             attachments: item.attachments || item.proofs || [],
+            resolutionProof: item.resolutionProof || null,
+            resolution_proof_url: item.resolution_proof_url || (item.resolutionProof?.fileData || (typeof item.resolutionProof === 'string' ? item.resolutionProof : '')),
+            resolution_notes: item.resolution_notes || item.resolutionNotes || '',
+            resolutionNotes: item.resolutionNotes || item.resolution_notes || '',
+            feedback: item.feedback || null,
+            appealHistory: item.appealHistory || [],
+            appealCount: item.appealCount || (item.appealHistory?.length || 0),
             proofs: (item.attachments && item.attachments.length > 0)
               ? item.attachments
               : (item.proofs && item.proofs.length > 0
@@ -292,61 +300,52 @@ export default function AdminDashboard({ onLogout }) {
             {/* Department Filter Tabs */}
             <DepartmentTabs activeTab={activeTab} setActiveTab={handleSelectTab} />
 
-            {/* Split Screen layout: Table / Control Panel */}
-            <div className="px-6 py-6 flex flex-col lg:flex-row gap-6 items-start">
-              
-              <div className={`transition-all duration-300 w-full ${
-                selectedComplaint ? 'lg:w-2/3' : 'lg:w-full'
-              }`}>
-                {/* Active KPI Filter Banner */}
-                {kpiFilter && (
-                  <div className="mb-4 flex items-center justify-between bg-emerald-50 border border-emerald-200 px-4 py-2.5 rounded-xl text-xs shadow-sm animate-in fade-in-50 duration-150">
-                    <div className="flex items-center gap-2 text-emerald-900 font-medium">
-                      <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
-                      <span>
-                        Filtered by KPI Metric:{' '}
-                        <strong className="font-bold text-brand-green uppercase">
-                          {kpiFilter === 'OPEN' && 'Total Open Tickets (Unresolved)'}
-                          {kpiFilter === 'CRITICAL' && 'Critical Escalations (Priority: CRITICAL)'}
-                          {kpiFilter === 'BREACHED' && 'SLA Breaches (Countdown Expired)'}
-                          {kpiFilter === 'RESOLVED' && 'Resolved Tickets (Historical View)'}
-                        </strong>
-                        {' '}({filteredComplaints.length} tickets matching)
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => setKpiFilter(null)}
-                      className="font-bold text-emerald-700 hover:text-brand-green hover:underline cursor-pointer flex items-center gap-1"
-                    >
-                      Reset Filter
-                    </button>
+            {/* Full-Width Complaints Table */}
+            <div className="px-6 py-6 w-full">
+              {/* Active KPI Filter Banner */}
+              {kpiFilter && (
+                <div className="mb-4 flex items-center justify-between bg-emerald-50 border border-emerald-200 px-4 py-2.5 rounded-xl text-xs shadow-sm animate-in fade-in-50 duration-150">
+                  <div className="flex items-center gap-2 text-emerald-900 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse"></span>
+                    <span>
+                      Filtered by KPI Metric:{' '}
+                      <strong className="font-bold text-brand-green uppercase">
+                        {kpiFilter === 'OPEN' && 'Total Open Tickets (Unresolved)'}
+                        {kpiFilter === 'CRITICAL' && 'Critical Escalations (Priority: CRITICAL)'}
+                        {kpiFilter === 'BREACHED' && 'SLA Breaches (Countdown Expired)'}
+                        {kpiFilter === 'RESOLVED' && 'Resolved Tickets (Historical View)'}
+                      </strong>
+                      {' '}({filteredComplaints.length} tickets matching)
+                    </span>
                   </div>
-                )}
-
-                <ComplaintsTable
-                  complaints={filteredComplaints}
-                  selectedComplaintId={selectedComplaint?.id || null}
-                  onSelectComplaint={(complaint) => {
-                    if (selectedComplaint && selectedComplaint.id === complaint.id) {
-                      setSelectedComplaint(null);
-                    } else {
-                      setSelectedComplaint(complaint);
-                    }
-                  }}
-                />
-              </div>
-
-              {selectedComplaint && (
-                <div className="w-full lg:w-1/3">
-                  <DepartmentControlPanel
-                    complaint={selectedComplaint}
-                    onClose={() => setSelectedComplaint(null)}
-                    onUpdateComplaint={handleUpdateComplaint}
-                  />
+                  <button
+                    onClick={() => setKpiFilter(null)}
+                    className="font-bold text-emerald-700 hover:text-brand-green hover:underline cursor-pointer flex items-center gap-1"
+                  >
+                    Reset Filter
+                  </button>
                 </div>
               )}
 
+              <ComplaintsTable
+                complaints={filteredComplaints}
+                selectedComplaintId={selectedComplaint?.id || null}
+                onSelectComplaint={(complaint) => {
+                  setSelectedComplaint(complaint);
+                }}
+                onViewFeedback={(complaint) => {
+                  setSelectedComplaint(complaint);
+                }}
+              />
             </div>
+
+            {selectedComplaint && (
+              <DepartmentControlPanel
+                complaint={selectedComplaint}
+                onClose={() => setSelectedComplaint(null)}
+                onUpdateComplaint={handleUpdateComplaint}
+              />
+            )}
           </>
         ) : (
           <>

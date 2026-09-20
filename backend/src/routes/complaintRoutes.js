@@ -124,7 +124,10 @@ router.post('/', optionalAuth, async (req, res) => {
     const safeAttachments = Array.isArray(attachments) ? attachments : [];
     const safeProofs = (Array.isArray(proofs) && proofs.length > 0)
       ? proofs
-      : safeAttachments.map((a) => ({ fileName: a.fileName, url: a.fileData }));
+      : safeAttachments.map((a) => ({ fileName: a.fileName || a.name || 'Attachment', url: a.fileData || a.url || '' }));
+
+    const initialStage = finalDept ? 'AI_ANALYSED' : 'SUBMITTED';
+    const initialStatus = initialStage === 'AI_ANALYSED' ? 'AI Analysed' : 'Submitted';
 
     const complaint = await Complaint.create({
       ticket_id,
@@ -136,7 +139,8 @@ router.post('/', optionalAuth, async (req, res) => {
       assigned_department_code: finalDept.toUpperCase(),
       assigned_department_name: finalDeptName,
       priority: finalPriority || 'MEDIUM',
-      status: 'Submitted',
+      status: initialStatus,
+      stage: initialStage,
       is_anonymous: Boolean(is_anonymous),
       student: req.user ? req.user._id : undefined,
       studentId: req.user ? req.user._id : undefined,
@@ -149,12 +153,22 @@ router.post('/', optionalAuth, async (req, res) => {
       is_sla_breached: false,
       attachments: safeAttachments,
       proofs: safeProofs,
+      appealHistory: [],
       history: [
         {
           old_status: 'None',
-          new_status: 'Submitted',
+          new_status: initialStatus,
           changed_by_name: studentName,
           remarks: 'Complaint filed via Student Desk',
+          timestamp: new Date()
+        }
+      ],
+      timeline: [
+        {
+          status: initialStatus,
+          changedBy: studentName,
+          role: 'STUDENT',
+          remarks: 'Complaint lodged by student',
           timestamp: new Date()
         }
       ]
@@ -186,7 +200,7 @@ router.get('/track/:ticketId', async (req, res) => {
 
     const now = new Date();
     if (complaint.sla_deadline_at) {
-      complaint.is_sla_breached = now > new Date(complaint.sla_deadline_at) && !['Resolved', 'Closed'].includes(complaint.status);
+      complaint.is_sla_breached = now > new Date(complaint.sla_deadline_at) && !['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(complaint.status);
     }
 
     return res.json(complaint.toJSON());
@@ -195,12 +209,59 @@ router.get('/track/:ticketId', async (req, res) => {
   }
 });
 
+// Linear 6-stage sequence & transitions
+const STAGE_ORDER = [
+  'SUBMITTED',
+  'AI_ANALYSED',
+  'ASSIGNED',
+  'IN_PROGRESS',
+  'PENDING_VERIFICATION',
+  'RESOLVED'
+];
+
+const STAGE_DISPLAY_STATUS = {
+  'SUBMITTED': 'Submitted',
+  'AI_ANALYSED': 'AI Analysed',
+  'ASSIGNED': 'Assigned',
+  'IN_PROGRESS': 'In Progress',
+  'PENDING_VERIFICATION': 'Resolution Pending Verification',
+  'RESOLVED': 'Resolved'
+};
+
+const STATUS_TO_CANONICAL_STAGE = {
+  'Submitted': 'SUBMITTED',
+  'SUBMITTED': 'SUBMITTED',
+  'AI Analysed': 'AI_ANALYSED',
+  'AI_ANALYSED': 'AI_ANALYSED',
+  'Assigned': 'ASSIGNED',
+  'ASSIGNED': 'ASSIGNED',
+  'In Progress': 'IN_PROGRESS',
+  'IN_PROGRESS': 'IN_PROGRESS',
+  'Resolution Pending Verification': 'PENDING_VERIFICATION',
+  'PENDING_VERIFICATION': 'PENDING_VERIFICATION',
+  'Resolved': 'RESOLVED',
+  'RESOLVED': 'RESOLVED',
+  'Reopened': 'IN_PROGRESS',
+  'REOPENED': 'IN_PROGRESS'
+};
+
 // @route   PATCH /api/complaints/:id/status
-// @desc    Update complaint status, re-route department, modify priority, or add admin comment
+// @desc    Update complaint status/stage with linear step validation & resolution proof check
 router.patch('/:id/status', optionalAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, resolutionProof, resolution_proof_url, resolution_notes, priority, department, adminComments, remarks } = req.body;
+    const {
+      status,
+      stage,
+      resolutionProof,
+      resolution_proof_url,
+      resolutionNotes,
+      resolution_notes,
+      priority,
+      department,
+      adminComments,
+      remarks
+    } = req.body;
 
     const complaint = await Complaint.findOne({
       $or: [{ _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }, { ticket_id: id.toUpperCase() }]
@@ -212,55 +273,124 @@ router.patch('/:id/status', optionalAuth, async (req, res) => {
 
     // Role check for staff: must belong to same department
     if (req.user && (req.user.role === 'DEPT_HEAD' || req.user.role === 'STAFF')) {
-      if (complaint.department !== req.user.department) {
+      const userDept = (req.user.department || req.user.departmentCode || '').toUpperCase();
+      const compDept = (complaint.department || complaint.departmentCode || '').toUpperCase();
+      if (userDept && compDept && userDept !== compDept) {
         return res.status(403).json({ error: 'Cannot modify complaints assigned to another department' });
       }
     }
 
-    const changerName = req.user ? req.user.name : 'System Administrator';
+    const changerName = req.user ? (req.user.name || req.user.full_name) : 'Department Staff';
+    const changerRole = req.user?.role || 'STAFF';
 
-    // Status transition
-    if (status && status !== complaint.status) {
-      const oldStatus = complaint.status;
-      complaint.status = status;
+    // Target stage determination
+    let targetStage = stage ? stage.toUpperCase().trim() : null;
+    let targetStatus = status ? status.trim() : null;
 
-      // When moving from REOPENED to In Progress, mark breach reset
-      if (['REOPENED', 'Reopened'].includes(oldStatus)) {
-        if (['In Progress', 'IN_PROGRESS'].includes(status)) {
-          complaint.is_sla_breached = false;
-          complaint.isSlaBreached = false;
+    if (!targetStage && targetStatus) {
+      targetStage = STATUS_TO_CANONICAL_STAGE[targetStatus] || null;
+    }
+    if (targetStage && !targetStatus) {
+      targetStatus = STAGE_DISPLAY_STATUS[targetStage] || targetStage;
+    }
+
+    // Check if transitioning stage/status
+    const currentStage = complaint.stage || STATUS_TO_CANONICAL_STAGE[complaint.status] || 'SUBMITTED';
+    const isAppealed = complaint.status === 'APPEALED' || complaint.status === 'Appealed';
+
+    if (targetStage && targetStage !== currentStage) {
+      const currentStageIndex = STAGE_ORDER.indexOf(currentStage);
+      const targetStageIndex = STAGE_ORDER.indexOf(targetStage);
+
+      // Validate linear transitions for staff
+      const isAdmin = req.user && req.user.role === 'ADMIN';
+
+      if (!isAdmin) {
+        if (isAppealed) {
+          // Re-investigate workflow: from APPEALED, staff can transition to IN_PROGRESS or ASSIGNED
+          const allowedReinvestigate = ['ASSIGNED', 'IN_PROGRESS'];
+          if (!allowedReinvestigate.includes(targetStage)) {
+            return res.status(400).json({
+              error: `For appealed grievances, you must choose "Re-investigate" to transition to Assigned or In Progress before further stages.`
+            });
+          }
+        } else {
+          // Enforce strictly linear stage transitions (cannot skip steps)
+          if (targetStageIndex === -1 || targetStageIndex !== currentStageIndex + 1) {
+            return res.status(400).json({
+              error: `Invalid stage transition. You cannot skip stages. Expected next stage: "${STAGE_ORDER[currentStageIndex + 1] || 'None'}" (current: "${currentStage}").`
+            });
+          }
         }
       }
 
+      // Mandatory Resolution Proof check on RESOLVED
+      if (targetStage === 'RESOLVED' || ['Resolved', 'RESOLVED'].includes(targetStatus)) {
+        const hasIncomingProof = resolutionProof && (
+          (typeof resolutionProof === 'string' && resolutionProof.trim()) ||
+          (resolutionProof.fileData && resolutionProof.fileData.trim()) ||
+          (resolutionProof.url && resolutionProof.url.trim()) ||
+          (resolutionProof.fileName && resolutionProof.fileName.trim())
+        );
+        const hasExistingProof = complaint.resolutionProof && (
+          (typeof complaint.resolutionProof === 'string' && complaint.resolutionProof.trim()) ||
+          (complaint.resolutionProof.fileData && complaint.resolutionProof.fileData.trim()) ||
+          (complaint.resolutionProof.url && complaint.resolutionProof.url.trim())
+        );
+        const hasProofUrl = (resolution_proof_url && resolution_proof_url.trim()) ||
+          (complaint.resolution_proof_url && complaint.resolution_proof_url.trim());
+
+        if (!hasIncomingProof && !hasExistingProof && !hasProofUrl) {
+          return res.status(400).json({
+            error: 'Mandatory resolution proof photo/document is required when resolving a complaint.'
+          });
+        }
+      }
+
+      const oldStatus = complaint.status;
+      complaint.status = targetStatus || STAGE_DISPLAY_STATUS[targetStage] || targetStage;
+      complaint.stage = targetStage;
+
+      // Handle proof upload
       if (resolutionProof) {
         complaint.resolutionProof = resolutionProof;
-        complaint.resolution_proof_url = resolutionProof.fileData || resolutionProof.fileName || '';
+        const proofUrl = typeof resolutionProof === 'string'
+          ? resolutionProof
+          : (resolutionProof.fileData || resolutionProof.url || resolutionProof.fileName || '');
+        complaint.resolution_proof_url = proofUrl;
+
         if (!complaint.proofs) complaint.proofs = [];
         complaint.proofs.push({
           fileName: resolutionProof.fileName || 'Resolution_Proof',
-          url: resolutionProof.fileData || '',
+          url: proofUrl,
           uploadedAt: new Date()
         });
+
         if (!complaint.attachments) complaint.attachments = [];
         complaint.attachments.push({
           fileName: resolutionProof.fileName || 'Resolution_Proof',
-          fileData: resolutionProof.fileData || '',
-          fileType: resolutionProof.fileType || '',
+          fileData: proofUrl,
+          fileType: resolutionProof.fileType || 'image/jpeg',
           fileSize: resolutionProof.fileSize || 0,
           uploadedAt: new Date()
         });
       } else if (resolution_proof_url) {
         complaint.resolution_proof_url = resolution_proof_url;
       }
-      if (resolution_notes) {
-        complaint.resolution_notes = resolution_notes;
+
+      // Handle resolution notes (optional)
+      const notes = resolutionNotes !== undefined ? resolutionNotes : resolution_notes;
+      if (notes !== undefined) {
+        complaint.resolutionNotes = notes;
+        complaint.resolution_notes = notes;
       }
 
-      const noteText = remarks || resolution_notes || `Status updated from ${oldStatus} to ${status}`;
+      const noteText = remarks || notes || `Stage updated: ${currentStage} → ${targetStage}`;
 
+      if (!complaint.history) complaint.history = [];
       complaint.history.push({
         old_status: oldStatus,
-        new_status: status,
+        new_status: complaint.status,
         changed_by_name: changerName,
         remarks: noteText,
         timestamp: new Date()
@@ -268,12 +398,26 @@ router.patch('/:id/status', optionalAuth, async (req, res) => {
 
       if (!complaint.timeline) complaint.timeline = [];
       complaint.timeline.push({
-        status: status,
+        status: complaint.status,
         changedBy: changerName,
-        role: req.user?.role || 'STAFF',
+        role: changerRole,
         remarks: noteText,
         timestamp: new Date()
       });
+    } else {
+      // Non-stage updates (proof, notes, priority, routing)
+      if (resolutionProof) {
+        complaint.resolutionProof = resolutionProof;
+        const proofUrl = typeof resolutionProof === 'string'
+          ? resolutionProof
+          : (resolutionProof.fileData || resolutionProof.url || resolutionProof.fileName || '');
+        complaint.resolution_proof_url = proofUrl;
+      }
+      const notes = resolutionNotes !== undefined ? resolutionNotes : resolution_notes;
+      if (notes !== undefined) {
+        complaint.resolutionNotes = notes;
+        complaint.resolution_notes = notes;
+      }
     }
 
     // Priority update
@@ -336,11 +480,16 @@ router.patch('/:id', optionalAuth, async (req, res) => {
 });
 
 // @route   POST /api/complaints/:id/feedback
-// @desc    Submit 5-star resolution feedback or reopen request
+// @desc    Submit 1-5 star resolution feedback
 router.post('/:id/feedback', optionalAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const { rating, comments, selected_tags, reopen_requested } = req.body;
+
+    const numRating = Number(rating);
+    if (!numRating || numRating < 1 || numRating > 5) {
+      return res.status(400).json({ error: 'Valid rating between 1 and 5 stars is required.' });
+    }
 
     const complaint = await Complaint.findOne({
       $or: [{ _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null }, { ticket_id: id.toUpperCase() }]
@@ -351,18 +500,19 @@ router.post('/:id/feedback', optionalAuth, async (req, res) => {
     }
 
     complaint.feedback = {
-      rating: Number(rating) || 5,
-      comments: comments || '',
+      rating: numRating,
+      comments: (comments || '').trim(),
       selected_tags: selected_tags || [],
       reopen_requested: Boolean(reopen_requested),
       submittedAt: new Date()
     };
 
-    const studentName = req.user ? req.user.name : complaint.student_name || 'Student';
+    const studentName = req.user ? (req.user.name || req.user.full_name) : (complaint.student_name || 'Student');
 
     if (reopen_requested) {
       const oldStatus = complaint.status;
       complaint.status = 'Reopened';
+      complaint.stage = 'IN_PROGRESS';
       complaint.history.push({
         old_status: oldStatus,
         new_status: 'Reopened',
@@ -375,7 +525,7 @@ router.post('/:id/feedback', optionalAuth, async (req, res) => {
         old_status: complaint.status,
         new_status: complaint.status,
         changed_by_name: studentName,
-        remarks: `Student rated resolution: ${rating} Stars.`,
+        remarks: `Student submitted feedback: ${numRating} Stars${comments ? ` - "${comments}"` : ''}`,
         timestamp: new Date()
       });
     }
@@ -386,7 +536,7 @@ router.post('/:id/feedback', optionalAuth, async (req, res) => {
       success: true,
       message: reopen_requested ? 'Ticket reopened' : 'Feedback submitted successfully',
       feedback: complaint.feedback,
-      status: complaint.status
+      complaint: complaint.toJSON()
     });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to record feedback', detail: err.message });
