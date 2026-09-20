@@ -167,6 +167,8 @@ const complaintSchema = new mongoose.Schema(
     },
     timeline: [
       {
+        action: { type: String, default: 'STATUS_UPDATED' },
+        message: { type: String, default: '' },
         status: { type: String },
         changedBy: { type: String },
         role: { type: String },

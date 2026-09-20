@@ -15,6 +15,7 @@ import {
   Image as ImageIcon, 
   Lock, 
   ShieldAlert,
+  ShieldCheck,
   Clock,
   RotateCcw,
   UploadCloud,
@@ -78,6 +79,10 @@ export default function DepartmentControlPanel({
   const [apiError, setApiError] = useState('');
   const [apiSuccess, setApiSuccess] = useState('');
   const [previewAttachment, setPreviewAttachment] = useState(null);
+  const [adminAction, setAdminAction] = useState(null); // 'CLOSE' | 'REOPEN' | null
+  const [closeRemarks, setCloseRemarks] = useState('');
+  const [reopenReason, setReopenReason] = useState('');
+  const [extensionHours, setExtensionHours] = useState(24);
 
   useEffect(() => {
     if (complaint) {
@@ -89,6 +94,10 @@ export default function DepartmentControlPanel({
       setApiError('');
       setApiSuccess('');
       setPreviewAttachment(null);
+      setAdminAction(null);
+      setCloseRemarks('');
+      setReopenReason('');
+      setExtensionHours(24);
     }
   }, [complaint?.id]);
 
@@ -160,8 +169,8 @@ export default function DepartmentControlPanel({
     setApiError('');
     setApiSuccess('');
 
-    // If moving to PENDING_VERIFICATION or RESOLVED, prompt for resolution proof if not yet uploaded
-    const needsProofUpload = targetStage === 'RESOLVED' || targetStage === 'PENDING_VERIFICATION';
+    // Only prompt for resolution proof upload when transitioning to RESOLVED
+    const needsProofUpload = targetStage === 'RESOLVED';
     const alreadyHasProof = complaint.resolutionProof || complaint.resolution_proof_url;
 
     if (needsProofUpload && !alreadyHasProof && !resolutionFile) {
@@ -176,27 +185,30 @@ export default function DepartmentControlPanel({
   const handleReinvestigate = async () => {
     setApiError('');
     setApiSuccess('');
-    await executeTransition('IN_PROGRESS', null, 'Staff initiated re-investigation following student appeal.');
+    await executeTransition('IN_PROGRESS', null, '', 'Staff initiated re-investigation following student appeal.');
   };
 
-  const executeTransition = async (targetStage, proof, notes) => {
+  const executeTransition = async (targetStage, proof, notes, remarks) => {
     setIsTransitioning(true);
     setApiError('');
     setApiSuccess('');
 
     try {
       const targetId = complaint.db_id || complaint._id || complaint.id;
+      const targetStatus = targetStage === 'RESOLVED' ? 'Resolved' : targetStage === 'IN_PROGRESS' ? 'In Progress' : targetStage;
       const body = {
         stage: targetStage,
+        status: targetStatus,
         ...(proof ? { resolutionProof: proof } : {}),
         ...(notes ? { resolutionNotes: notes, resolution_notes: notes } : {}),
+        ...(remarks ? { remarks } : {}),
       };
 
       const res = await apiClient.complaints.updateStatus(targetId, body);
       const updated = res.complaint || {
         ...complaint,
         stage: targetStage,
-        status: targetStage === 'RESOLVED' ? 'Resolved' : targetStage === 'IN_PROGRESS' ? 'In Progress' : targetStage,
+        status: targetStatus,
         ...(proof ? { resolutionProof: proof } : {}),
         ...(notes ? { resolutionNotes: notes, resolution_notes: notes } : {})
       };
@@ -208,7 +220,7 @@ export default function DepartmentControlPanel({
       setPendingStatus(null);
       setResolutionFile(null);
       setResolutionNotes('');
-      setApiSuccess(`✓ Successfully transitioned complaint to "${targetStage}".`);
+      setApiSuccess(`✓ Successfully moved complaint to "${targetStage}".`);
     } catch (err) {
       setApiError(err.message || 'Failed to update complaint stage.');
     } finally {
@@ -223,6 +235,58 @@ export default function DepartmentControlPanel({
       return;
     }
     executeTransition(pendingStatus || 'RESOLVED', resolutionFile, resolutionNotes);
+  };
+
+  // Admin Governance Actions
+  const handleAdminClose = async (e) => {
+    e.preventDefault();
+    setIsTransitioning(true);
+    setApiError('');
+    setApiSuccess('');
+    try {
+      const targetId = complaint.db_id || complaint._id || complaint.id;
+      const res = await apiClient.complaints.close(targetId, { remarks: closeRemarks.trim() });
+      const updated = res.complaint || { ...complaint, status: 'CLOSED' };
+      if (onUpdateComplaint) {
+        await onUpdateComplaint(updated);
+      }
+      setAdminAction(null);
+      setCloseRemarks('');
+      setApiSuccess('✓ Grievance officially marked CLOSED by Administrator.');
+    } catch (err) {
+      setApiError(err.message || 'Failed to close grievance.');
+    } finally {
+      setIsTransitioning(false);
+    }
+  };
+
+  const handleAdminReopen = async (e) => {
+    e.preventDefault();
+    if (!reopenReason.trim()) {
+      setApiError('Reopening justification remarks are mandatory.');
+      return;
+    }
+    setIsTransitioning(true);
+    setApiError('');
+    setApiSuccess('');
+    try {
+      const targetId = complaint.db_id || complaint._id || complaint.id;
+      const res = await apiClient.complaints.reopen(targetId, {
+        reopenReason: reopenReason.trim(),
+        extensionHours: Number(extensionHours) || 24
+      });
+      const updated = res.complaint || { ...complaint, status: 'REOPENED', stage: 'IN_PROGRESS' };
+      if (onUpdateComplaint) {
+        await onUpdateComplaint(updated);
+      }
+      setAdminAction(null);
+      setReopenReason('');
+      setApiSuccess(`✓ Grievance re-opened with +${extensionHours}h extension by Administrator.`);
+    } catch (err) {
+      setApiError(err.message || 'Failed to re-open grievance.');
+    } finally {
+      setIsTransitioning(false);
+    }
   };
 
   const handleAddComment = (e) => {
@@ -497,177 +561,323 @@ export default function DepartmentControlPanel({
               )}
             </div>
 
-            {/* Section 4: Action Controls (Linear stage transition / Re-investigate / Upload Resolution Proof) */}
-            <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-slate-50/50">
-              <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1.5 m-0">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                Department Action Controls
-              </h4>
-
-              {/* Appeal Alert Banner & Re-investigate Button */}
-              {isAppealed ? (
-                <div className="p-4 bg-amber-50 border-2 border-amber-400 rounded-xl space-y-3">
-                  <div className="flex items-center gap-2 text-amber-950">
-                    <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
-                    <div>
-                      <h5 className="text-xs font-black uppercase tracking-wider m-0">
-                        Student Filed an Appeal (Cycle #{appealCycle})
-                      </h5>
-                      <p className="text-xs text-amber-900 mt-0.5 m-0">
-                        The resolution was contested. Re-investigate the issue and carry out corrective work.
-                      </p>
-                    </div>
-                  </div>
-
-                  {complaint.appeal?.reason && (
-                    <div className="p-3 bg-white rounded-lg border border-amber-200 text-xs">
-                      <span className="font-extrabold text-amber-900 block mb-0.5">Student's Appeal Reason:</span>
-                      <p className="italic text-slate-800 m-0">"{complaint.appeal.reason}"</p>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={handleReinvestigate}
-                    disabled={isTransitioning}
-                    className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-xl transition shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-                  >
-                    {isTransitioning ? (
-                      <><Loader2 className="w-4 h-4 animate-spin" /> Starting Re-investigation...</>
-                    ) : (
-                      <><RotateCcw className="w-4 h-4" /> Re-investigate Grievance (Move to In Progress)</>
-                    )}
-                  </button>
+            {/* Section 4: Action Controls (Role-Based: Department Linear Workflow vs Admin Governance) */}
+            {isStaffView ? (
+              /* DEPARTMENT WORKFLOW CONTROLS */
+              <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-slate-50/50">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1.5 m-0">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    Department Action Controls
+                  </h4>
+                  <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full">
+                    Operational Execution
+                  </span>
                 </div>
-              ) : null}
 
-              {/* Proof Upload Form (when resolving or pending verification) */}
-              {pendingStatus ? (
-                <form onSubmit={handleProofSubmit} className="space-y-4 p-4 bg-amber-50/90 border border-amber-300 rounded-xl shadow-xs">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-black text-amber-950 uppercase tracking-wide flex items-center gap-1.5 m-0">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-700" />
-                      Resolution Proof Required: Moving to "{pendingStatus}"
-                    </p>
-                  </div>
+                {/* Appeal Alert Banner & Re-investigate Button */}
+                {isAppealed ? (
+                  <div className="p-4 bg-amber-50 border-2 border-amber-400 rounded-xl space-y-3">
+                    <div className="flex items-center gap-2 text-amber-950">
+                      <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                      <div>
+                        <h5 className="text-xs font-black uppercase tracking-wider m-0">
+                          Student Filed an Appeal (Cycle #{appealCycle})
+                        </h5>
+                        <p className="text-xs text-amber-900 mt-0.5 m-0">
+                          The resolution was contested by the student. Advance to Re-investigation to resolve the issue.
+                        </p>
+                      </div>
+                    </div>
 
-                  {/* Mandatory Resolution Proof Photo */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-                      Upload Resolution Proof Photo / Document <span className="text-rose-500">* (Mandatory)</span>
-                    </label>
-
-                    {!resolutionFile ? (
-                      <label className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-amber-300 hover:border-emerald-600 rounded-xl bg-white hover:bg-emerald-50/40 transition cursor-pointer group">
-                        <UploadCloud className="w-8 h-8 text-amber-600 group-hover:text-emerald-700 transition mb-1" />
-                        <span className="text-xs font-bold text-slate-800">
-                          Click to select resolution proof photo
-                        </span>
-                        <span className="text-[10px] text-slate-400 mt-0.5">
-                          JPG, PNG, PDF (Up to 12MB)
-                        </span>
-                        <input
-                          type="file"
-                          accept=".jpg,.jpeg,.png,.pdf"
-                          onChange={handleFileSelect}
-                          required
-                          className="hidden"
-                        />
-                      </label>
-                    ) : (
-                      <div className="flex items-center justify-between p-3 bg-white border border-emerald-300 rounded-xl shadow-xs">
-                        <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                          {resolutionFile.fileType?.includes('pdf') || resolutionFile.fileName?.toLowerCase().endsWith('.pdf') ? (
-                            <FileText className="w-6 h-6 text-rose-600 flex-shrink-0" />
-                          ) : (
-                            <ImageIcon className="w-6 h-6 text-emerald-600 flex-shrink-0" />
-                          )}
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-slate-800 truncate m-0">
-                              {resolutionFile.fileName}
-                            </p>
-                            <span className="text-[10px] text-slate-400 font-semibold">
-                              {(resolutionFile.fileSize / 1024).toFixed(1)} KB • Attached
-                            </span>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setResolutionFile(null)}
-                          className="p-1 text-slate-400 hover:text-rose-600 rounded-md transition cursor-pointer"
-                          title="Remove"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
+                    {complaint.appeal?.reason && (
+                      <div className="p-3 bg-white rounded-lg border border-amber-200 text-xs">
+                        <span className="font-extrabold text-amber-900 block mb-0.5">Student's Appeal Reason:</span>
+                        <p className="italic text-slate-800 m-0">"{complaint.appeal.reason}"</p>
                       </div>
                     )}
-                  </div>
 
-                  {/* Optional Resolution Notes */}
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-                      Resolution Remarks / Notes <span className="text-slate-400 font-normal">(Optional)</span>
-                    </label>
-                    <textarea
-                      value={resolutionNotes}
-                      onChange={(e) => setResolutionNotes(e.target.value)}
-                      placeholder="Optional comments regarding corrective actions taken, technician details, or inspection notes..."
-                      rows="3"
-                      className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600 text-slate-800 font-medium"
-                    />
-                  </div>
-
-                  <div className="flex gap-2 pt-1">
-                    <button
-                      type="submit"
-                      disabled={isTransitioning || !resolutionFile}
-                      className="flex-1 py-2.5 px-4 bg-[#084325] hover:bg-[#06331c] disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
-                    >
-                      {isTransitioning ? (
-                        <><Loader2 className="h-4 w-4 animate-spin" /> Saving Verification...</>
-                      ) : (
-                        <><CheckCircle2 className="h-4 w-4 text-amber-300" /> Confirm & Transition to {pendingStatus}</>
-                      )}
-                    </button>
                     <button
                       type="button"
-                      onClick={() => setPendingStatus(null)}
+                      onClick={handleReinvestigate}
                       disabled={isTransitioning}
-                      className="py-2.5 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                      className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-xl transition shadow-xs flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                     >
-                      Cancel
+                      {isTransitioning ? (
+                        <><Loader2 className="w-4 h-4 animate-spin" /> Advancing to Re-investigation...</>
+                      ) : (
+                        <><RotateCcw className="w-4 h-4" /> Start Re-investigation (Move to In Progress)</>
+                      )}
                     </button>
                   </div>
-                </form>
-              ) : !isAppealed ? (
-                <div>
-                  {nextTransitionInfo ? (
-                    <div className="space-y-2">
-                      <p className="text-[11px] text-slate-500 font-semibold uppercase">
-                        Linear Step Transition:
+                ) : null}
+
+                {/* Proof Upload Form (when resolving) */}
+                {pendingStatus ? (
+                  <form onSubmit={handleProofSubmit} className="space-y-4 p-4 bg-amber-50/90 border border-amber-300 rounded-xl shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-black text-amber-950 uppercase tracking-wide flex items-center gap-1.5 m-0">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                        Resolution Proof Required: Moving to "{pendingStatus}"
                       </p>
+                    </div>
+
+                    {/* Mandatory Resolution Proof Photo */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
+                        Upload Resolution Proof Photo / Document <span className="text-rose-500">* (Mandatory)</span>
+                      </label>
+
+                      {!resolutionFile ? (
+                        <label className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-amber-300 hover:border-emerald-600 rounded-xl bg-white hover:bg-emerald-50/40 transition cursor-pointer group">
+                          <UploadCloud className="w-8 h-8 text-amber-600 group-hover:text-emerald-700 transition mb-1" />
+                          <span className="text-xs font-bold text-slate-800">
+                            Click to select resolution proof photo
+                          </span>
+                          <span className="text-[10px] text-slate-400 mt-0.5">
+                            JPG, PNG, PDF (Up to 12MB)
+                          </span>
+                          <input
+                            type="file"
+                            accept=".jpg,.jpeg,.png,.pdf"
+                            onChange={handleFileSelect}
+                            required
+                            className="hidden"
+                          />
+                        </label>
+                      ) : (
+                        <div className="flex items-center justify-between p-3 bg-white border border-emerald-300 rounded-xl shadow-xs">
+                          <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                            {resolutionFile.fileType?.includes('pdf') || resolutionFile.fileName?.toLowerCase().endsWith('.pdf') ? (
+                              <FileText className="w-6 h-6 text-rose-600 flex-shrink-0" />
+                            ) : (
+                              <ImageIcon className="w-6 h-6 text-emerald-600 flex-shrink-0" />
+                            )}
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-800 truncate m-0">
+                                {resolutionFile.fileName}
+                              </p>
+                              <span className="text-[10px] text-slate-400 font-semibold">
+                                {(resolutionFile.fileSize / 1024).toFixed(1)} KB • Attached
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setResolutionFile(null)}
+                            className="p-1 text-slate-400 hover:text-rose-600 rounded-md transition cursor-pointer"
+                            title="Remove"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Optional Resolution Notes */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
+                        Resolution Remarks / Notes <span className="text-slate-400 font-normal">(Optional)</span>
+                      </label>
+                      <textarea
+                        value={resolutionNotes}
+                        onChange={(e) => setResolutionNotes(e.target.value)}
+                        placeholder="Optional comments regarding corrective actions taken, technician details, or inspection notes..."
+                        rows="3"
+                        className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600 text-slate-800 font-medium"
+                      />
+                    </div>
+
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="submit"
+                        disabled={isTransitioning || !resolutionFile}
+                        className="flex-1 py-2.5 px-4 bg-[#084325] hover:bg-[#06331c] disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        {isTransitioning ? (
+                          <><Loader2 className="h-4 w-4 animate-spin" /> Saving Resolution...</>
+                        ) : (
+                          <><CheckCircle2 className="h-4 w-4 text-amber-300" /> Confirm & Transition to {pendingStatus}</>
+                        )}
+                      </button>
                       <button
                         type="button"
-                        onClick={() => handleLinearStep(nextTransitionInfo.next)}
+                        onClick={() => setPendingStatus(null)}
                         disabled={isTransitioning}
-                        className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition shadow-sm flex items-center justify-between cursor-pointer disabled:opacity-50"
+                        className="py-2.5 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
                       >
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-200" />
-                          <span>{nextTransitionInfo.label}</span>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-emerald-200" />
+                        Cancel
                       </button>
                     </div>
-                  ) : isResolved ? (
-                    <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                      <span>This grievance has completed the 6-stage lifecycle and is marked Resolved.</span>
-                    </div>
-                  ) : null}
+                  </form>
+                ) : !isAppealed ? (
+                  <div>
+                    {nextTransitionInfo ? (
+                      <div className="space-y-2">
+                        <p className="text-[11px] text-slate-500 font-semibold uppercase">
+                          Next Stage Action:
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => handleLinearStep(nextTransitionInfo.next)}
+                          disabled={isTransitioning}
+                          className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition shadow-sm flex items-center justify-between cursor-pointer disabled:opacity-50"
+                        >
+                          <div className="flex items-center gap-2">
+                            {isTransitioning ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+                            )}
+                            <span>{isTransitioning ? 'Advancing stage...' : nextTransitionInfo.label}</span>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-emerald-200" />
+                        </button>
+                      </div>
+                    ) : isResolved ? (
+                      <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 font-semibold flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span>This grievance has completed the 6-stage lifecycle and is marked Resolved.</span>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              /* ADMIN GOVERNANCE CONTROLS (READ-ONLY STAGES + SUPERVISORY CLOSE/REOPEN) */
+              <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-slate-50/50">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-extrabold text-slate-800 uppercase tracking-wide flex items-center gap-1.5 m-0">
+                    <ShieldCheck className="h-4 w-4 text-indigo-600" />
+                    Administrative Supervisory Controls
+                  </h4>
+                  <span className="text-[10px] font-bold text-indigo-800 bg-indigo-100 px-2.5 py-0.5 rounded-full">
+                    Executive Governance
+                  </span>
                 </div>
-              ) : null}
-            </div>
+
+                <div className="p-3.5 bg-indigo-50/60 border border-indigo-200 rounded-xl text-xs text-indigo-950 flex items-start gap-2.5">
+                  <Lock className="w-4 h-4 text-indigo-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold m-0 mb-0.5">Role Separation Policy Active</p>
+                    <p className="text-slate-600 m-0 leading-relaxed text-[11px]">
+                      Operational stage progression is managed exclusively by assigned Department staff. 
+                      Administrators provide supervisory oversight, formal grievance closure, or emergency reopening with custom SLA extension.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Close Complaint Form */}
+                {adminAction === 'CLOSE' ? (
+                  <form onSubmit={handleAdminClose} className="p-4 bg-white border border-slate-300 rounded-xl space-y-3 shadow-xs">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
+                      <Lock className="w-4 h-4 text-rose-600" />
+                      <span>Formally Close Grievance #{complaint.id}</span>
+                    </div>
+                    <textarea
+                      value={closeRemarks}
+                      onChange={(e) => setCloseRemarks(e.target.value)}
+                      placeholder="Enter administrative closure remarks or final arbitration notes..."
+                      rows="3"
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-600 text-slate-800"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        disabled={isTransitioning}
+                        className="py-2 px-4 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                      >
+                        {isTransitioning ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
+                        <span>Confirm Formal Closure</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAdminAction(null); setCloseRemarks(''); }}
+                        disabled={isTransitioning}
+                        className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : adminAction === 'REOPEN' ? (
+                  <form onSubmit={handleAdminReopen} className="p-4 bg-white border border-amber-300 rounded-xl space-y-3 shadow-xs">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950">
+                      <RotateCcw className="w-4 h-4 text-amber-600" />
+                      <span>Administrative Reopen with Custom SLA Extension</span>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                        Reopening Justification <span className="text-rose-500">*</span>
+                      </label>
+                      <textarea
+                        value={reopenReason}
+                        onChange={(e) => setReopenReason(e.target.value)}
+                        placeholder="State why this grievance is being reopened (e.g. incomplete work, student escalation)..."
+                        rows="2"
+                        required
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-800"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+                        Additional SLA Extension (Hours)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="168"
+                        value={extensionHours}
+                        onChange={(e) => setExtensionHours(e.target.value)}
+                        className="w-32 bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-amber-500 text-slate-800"
+                      />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="submit"
+                        disabled={isTransitioning || !reopenReason.trim()}
+                        className="py-2 px-4 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                      >
+                        {isTransitioning ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
+                        <span>Confirm Reopen Ticket</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAdminAction(null); setReopenReason(''); }}
+                        disabled={isTransitioning}
+                        className="py-2 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="flex flex-wrap gap-2.5">
+                    {complaint.status !== 'CLOSED' && (
+                      <button
+                        type="button"
+                        onClick={() => setAdminAction('CLOSE')}
+                        className="py-2.5 px-4 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <Lock className="w-4 h-4 text-rose-400" />
+                        <span>Formally Close Grievance</span>
+                      </button>
+                    )}
+
+                    {['Resolved', 'Closed', 'RESOLVED', 'CLOSED', 'APPEALED'].includes(complaint.status) && (
+                      <button
+                        type="button"
+                        onClick={() => setAdminAction('REOPEN')}
+                        className="py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Reopen Grievance (+Extension)</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Section 5: Verified Resolution Report & Proof (if resolved) */}
             {(complaint.resolutionProof || complaint.resolutionNotes || complaint.resolution_notes || complaint.resolution_proof_url) && (

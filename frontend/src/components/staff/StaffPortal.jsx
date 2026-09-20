@@ -140,25 +140,16 @@ export default function StaffPortal({ token: initialToken, user: initialUser, on
 
   const handleUpdateComplaint = async (updated) => {
     try {
-      const body = {
-        status: updated.status,
-        ...(updated.stage ? { stage: updated.stage } : {}),
-        ...(updated.resolutionProof ? { resolutionProof: updated.resolutionProof } : {}),
-        ...(updated.resolution_proof_url ? { resolution_proof_url: updated.resolution_proof_url } : {}),
-        ...(updated.resolution_notes ? { resolution_notes: updated.resolution_notes } : {}),
-        ...(updated.resolutionNotes ? { resolutionNotes: updated.resolutionNotes } : {}),
-        ...(updated.adminComments ? { adminComments: updated.adminComments } : {})
-      };
-
-      await apiClient.complaints.updateStatus(updated.db_id || updated.id, body);
-
-      setComplaints((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
-      if (selectedComplaint?.id === updated.id) {
+      setComplaints((prev) => prev.map((c) => (c.id === updated.id || c.db_id === updated.db_id ? { ...c, ...updated } : c)));
+      if (selectedComplaint?.id === updated.id || selectedComplaint?.db_id === updated.db_id) {
         setSelectedComplaint((prev) => ({ ...prev, ...updated }));
       }
+      // Re-fetch queue to guarantee all components and metrics are synchronized
+      await syncData(false);
       return { success: true };
     } catch (err) {
-      return { success: false, error: err.message || 'Failed to update complaint status.' };
+      console.warn('handleUpdateComplaint error:', err);
+      return { success: false, error: err.message || 'Failed to sync updated complaint.' };
     }
   };
 

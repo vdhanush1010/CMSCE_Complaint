@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { Complaint } from '../models/Complaint.js';
+import { Department } from '../models/Department.js';
 
 /**
  * Re-open an SLA breached or prematurely resolved grievance with custom SLA extension
@@ -41,7 +42,7 @@ export async function reopenComplaint(req, res) {
       complaint.isSlaBreached ||
       (complaint.sla_deadline_at && now > new Date(complaint.sla_deadline_at) && !['Resolved', 'Closed', 'RESOLVED'].includes(complaint.status))
     );
-    const isResolved = ['Resolved', 'Closed', 'RESOLVED'].includes(complaint.status);
+    const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED', 'APPEALED'].includes(complaint.status);
 
     // Validate that ticket is either SLA breached or resolved
     if (!isOverdue && !isResolved) {
@@ -412,3 +413,288 @@ export async function closeComplaint(req, res) {
     return res.status(500).json({ error: 'Failed to close grievance', detail: err.message });
   }
 }
+
+// Linear 6-stage sequence & transitions
+export const STAGE_ORDER = [
+  'SUBMITTED',
+  'AI_ANALYSED',
+  'ASSIGNED',
+  'IN_PROGRESS',
+  'PENDING_VERIFICATION',
+  'RESOLVED'
+];
+
+export const STAGE_DISPLAY_STATUS = {
+  'SUBMITTED': 'Submitted',
+  'AI_ANALYSED': 'AI Analysed',
+  'ASSIGNED': 'Assigned',
+  'IN_PROGRESS': 'In Progress',
+  'PENDING_VERIFICATION': 'Resolution Pending Verification',
+  'RESOLVED': 'Resolved'
+};
+
+export const STATUS_TO_CANONICAL_STAGE = {
+  'Submitted': 'SUBMITTED',
+  'SUBMITTED': 'SUBMITTED',
+  'AI Analysed': 'AI_ANALYSED',
+  'AI_ANALYSED': 'AI_ANALYSED',
+  'Assigned': 'ASSIGNED',
+  'ASSIGNED': 'ASSIGNED',
+  'In Progress': 'IN_PROGRESS',
+  'IN_PROGRESS': 'IN_PROGRESS',
+  'Resolution Pending Verification': 'PENDING_VERIFICATION',
+  'PENDING_VERIFICATION': 'PENDING_VERIFICATION',
+  'Resolved': 'RESOLVED',
+  'RESOLVED': 'RESOLVED',
+  'Closed': 'RESOLVED',
+  'CLOSED': 'RESOLVED',
+  'Reopened': 'IN_PROGRESS',
+  'REOPENED': 'IN_PROGRESS',
+  'APPEALED': 'SUBMITTED',
+  'Appealed': 'SUBMITTED'
+};
+
+/**
+ * Update complaint status and linear stage progression with proof check
+ * PATCH /api/complaints/:id/status
+ */
+export async function updateStatus(req, res) {
+  try {
+    const { id } = req.params;
+    const {
+      status,
+      stage,
+      resolutionProof,
+      resolution_proof_url,
+      resolutionNotes,
+      resolution_notes,
+      priority,
+      department,
+      adminComments,
+      remarks
+    } = req.body;
+
+    if (!id) {
+      return res.status(400).json({ error: 'Complaint identifier is required.' });
+    }
+
+    let complaint = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      complaint = await Complaint.findById(id);
+    }
+    if (!complaint) {
+      complaint = await Complaint.findOne({ ticket_id: id.toUpperCase().trim() });
+    }
+
+    if (!complaint) {
+      return res.status(404).json({ error: `Complaint ticket "${id}" not found.` });
+    }
+
+    // Role check for department staff: must belong to the same department
+    if (req.user && (req.user.role === 'DEPT_HEAD' || req.user.role === 'DEPARTMENT_HEAD' || req.user.role === 'STAFF')) {
+      const userDept = (req.user.department || req.user.departmentCode || '').toUpperCase();
+      const compDept = (complaint.department || complaint.departmentCode || complaint.assigned_department_code || '').toUpperCase();
+      if (userDept && compDept && userDept !== compDept) {
+        return res.status(403).json({ error: 'Forbidden: Cannot modify complaints assigned to another department.' });
+      }
+    }
+
+    const changerName = req.user?.name || req.user?.full_name || 'Department Staff';
+    const changerRole = req.user?.role || 'STAFF';
+    const isAdmin = req.user && req.user.role === 'ADMIN';
+
+    // Normalize target stage & status
+    let targetStage = stage ? stage.toUpperCase().trim() : null;
+    let targetStatus = status ? status.trim() : null;
+
+    if (!targetStage && targetStatus) {
+      targetStage = STATUS_TO_CANONICAL_STAGE[targetStatus] || null;
+    }
+    if (targetStage && !targetStatus) {
+      targetStatus = STAGE_DISPLAY_STATUS[targetStage] || targetStage;
+    }
+    if (targetStage === 'RESOLVED' && targetStatus && targetStatus.toUpperCase() === 'RESOLVED') {
+      targetStatus = 'Resolved';
+    }
+
+    const currentStage = complaint.stage || STATUS_TO_CANONICAL_STAGE[complaint.status] || 'SUBMITTED';
+    const isAppealed = complaint.status === 'APPEALED' || complaint.status === 'Appealed';
+    const oldStatus = complaint.status;
+
+    // Linear progression and appeal re-investigation rules
+    if (targetStage && (targetStage !== currentStage || isAppealed)) {
+      const currentStageIndex = STAGE_ORDER.indexOf(currentStage);
+      const targetStageIndex = STAGE_ORDER.indexOf(targetStage);
+
+      if (!isAdmin) {
+        if (isAppealed) {
+          // Re-investigation workflow from APPEALED: staff can transition to IN_PROGRESS or ASSIGNED
+          const allowedReinvestigate = ['ASSIGNED', 'IN_PROGRESS'];
+          if (!allowedReinvestigate.includes(targetStage)) {
+            return res.status(400).json({
+              error: `For appealed grievances, you must click "Start Re-investigation" to transition to Assigned or In Progress before subsequent stages.`
+            });
+          }
+        } else {
+          // Strictly sequential progression: cannot skip intermediate stages
+          if (targetStageIndex === -1 || targetStageIndex !== currentStageIndex + 1) {
+            return res.status(400).json({
+              error: `Invalid stage transition. You cannot skip stages. Expected next stage: "${STAGE_ORDER[currentStageIndex + 1] || 'None'}" (current: "${currentStage}").`
+            });
+          }
+        }
+      }
+
+      // Mandatory Resolution Proof check when resolving
+      if (targetStage === 'RESOLVED' || ['Resolved', 'RESOLVED'].includes(targetStatus)) {
+        const hasIncomingProof = resolutionProof && (
+          (typeof resolutionProof === 'string' && resolutionProof.trim()) ||
+          (resolutionProof.fileData && resolutionProof.fileData.trim()) ||
+          (resolutionProof.url && resolutionProof.url.trim()) ||
+          (resolutionProof.fileName && resolutionProof.fileName.trim())
+        );
+        const hasExistingProof = complaint.resolutionProof && (
+          (typeof complaint.resolutionProof === 'string' && complaint.resolutionProof.trim()) ||
+          (complaint.resolutionProof.fileData && complaint.resolutionProof.fileData.trim()) ||
+          (complaint.resolutionProof.url && complaint.resolutionProof.url.trim())
+        );
+        const hasProofUrl = (resolution_proof_url && resolution_proof_url.trim()) ||
+          (complaint.resolution_proof_url && complaint.resolution_proof_url.trim());
+
+        if (!hasIncomingProof && !hasExistingProof && !hasProofUrl) {
+          return res.status(400).json({
+            error: 'Mandatory resolution proof photo or document is required when resolving a complaint.'
+          });
+        }
+      }
+
+      // Synchronously apply stage and status
+      complaint.stage = targetStage;
+      complaint.status = targetStatus || STAGE_DISPLAY_STATUS[targetStage] || targetStage;
+
+      // Attach resolution proof if provided
+      if (resolutionProof) {
+        complaint.resolutionProof = resolutionProof;
+        const proofUrl = typeof resolutionProof === 'string'
+          ? resolutionProof
+          : (resolutionProof.fileData || resolutionProof.url || resolutionProof.fileName || '');
+        complaint.resolution_proof_url = proofUrl;
+
+        if (!complaint.proofs) complaint.proofs = [];
+        complaint.proofs.push({
+          fileName: resolutionProof.fileName || 'Resolution_Proof',
+          url: proofUrl,
+          uploadedAt: new Date()
+        });
+
+        if (!complaint.attachments) complaint.attachments = [];
+        complaint.attachments.push({
+          fileName: resolutionProof.fileName || 'Resolution_Proof',
+          fileData: proofUrl,
+          fileType: resolutionProof.fileType || 'image/jpeg',
+          fileSize: resolutionProof.fileSize || 0,
+          uploadedAt: new Date()
+        });
+      } else if (resolution_proof_url) {
+        complaint.resolution_proof_url = resolution_proof_url;
+      }
+
+      // Resolution notes (optional)
+      const notes = resolutionNotes !== undefined ? resolutionNotes : resolution_notes;
+      if (notes !== undefined) {
+        complaint.resolutionNotes = notes;
+        complaint.resolution_notes = notes;
+      }
+
+      const noteText = remarks || notes || (isAppealed ? `Re-investigation initiated: Stage moved to ${targetStage}` : `Stage moved to ${targetStage}`);
+
+      // Push timeline entry with action: 'STAGE_UPDATED'
+      if (!complaint.timeline) complaint.timeline = [];
+      complaint.timeline.push({
+        action: 'STAGE_UPDATED',
+        message: `Complaint moved to ${targetStage}`,
+        status: complaint.status,
+        changedBy: changerName,
+        role: changerRole,
+        remarks: noteText,
+        timestamp: new Date()
+      });
+
+      // Push history entry
+      if (!complaint.history) complaint.history = [];
+      complaint.history.push({
+        old_status: oldStatus,
+        new_status: complaint.status,
+        changed_by_name: changerName,
+        remarks: noteText,
+        timestamp: new Date()
+      });
+    } else {
+      // Non-stage updates (proof, notes, remarks)
+      if (resolutionProof) {
+        complaint.resolutionProof = resolutionProof;
+        const proofUrl = typeof resolutionProof === 'string'
+          ? resolutionProof
+          : (resolutionProof.fileData || resolutionProof.url || resolutionProof.fileName || '');
+        complaint.resolution_proof_url = proofUrl;
+      }
+      const notes = resolutionNotes !== undefined ? resolutionNotes : resolution_notes;
+      if (notes !== undefined) {
+        complaint.resolutionNotes = notes;
+        complaint.resolution_notes = notes;
+      }
+    }
+
+    // Optional Priority update
+    if (priority && priority !== complaint.priority) {
+      complaint.priority = priority;
+      complaint.history.push({
+        old_status: complaint.status,
+        new_status: complaint.status,
+        changed_by_name: changerName,
+        remarks: `Priority updated to ${priority}`,
+        timestamp: new Date()
+      });
+    }
+
+    // Optional Department re-routing
+    if (department && department !== complaint.department) {
+      const oldDept = complaint.department;
+      complaint.department = department.toUpperCase();
+      complaint.assigned_department_code = department.toUpperCase();
+      const deptDoc = await Department.findOne({ code: department.toUpperCase() });
+      if (deptDoc) {
+        complaint.assigned_department_name = deptDoc.name;
+      }
+      complaint.ai_routing_reasoning = `Manually re-routed from ${oldDept} to ${complaint.assigned_department_name} by ${changerName}.`;
+      complaint.history.push({
+        old_status: complaint.status,
+        new_status: complaint.status,
+        changed_by_name: changerName,
+        remarks: `Re-routed to ${complaint.assigned_department_name}`,
+        timestamp: new Date()
+      });
+    }
+
+    // Optional Admin Comments
+    if (adminComments && Array.isArray(adminComments)) {
+      complaint.adminComments = adminComments.map((c) => ({
+        author: c.author || changerName,
+        text: c.text || '',
+        timestamp: c.timestamp || new Date()
+      }));
+    }
+
+    await complaint.save();
+
+    return res.json({
+      success: true,
+      message: `Complaint moved to ${complaint.stage || targetStage || complaint.status}`,
+      complaint: complaint.toJSON()
+    });
+  } catch (err) {
+    console.error('[Update Complaint Status Error]:', err);
+    return res.status(500).json({ error: 'Failed to update complaint status', detail: err.message });
+  }
+}
+

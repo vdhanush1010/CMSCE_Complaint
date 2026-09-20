@@ -137,23 +137,24 @@ export default function AdminDashboard({ onLogout }) {
 
   const handleUpdateComplaint = async (updated) => {
     try {
-      const body = {
-        status: updated.status,
-        ...(updated.resolution_proof_url ? { resolution_proof_url: updated.resolution_proof_url } : {}),
-        ...(updated.resolution_notes ? { resolution_notes: updated.resolution_notes } : {}),
-        ...(updated.priority ? { priority: updated.priority } : {}),
-        ...(updated.department ? { department: updated.department } : {}),
-        ...(updated.adminComments ? { adminComments: updated.adminComments } : {})
-      };
-
-      await apiClient.complaints.updateStatus(updated.db_id || updated.id, body);
-
-      setComplaints(prev => prev.map(c => c.id === updated.id ? updated : c));
-      if (selectedComplaint && selectedComplaint.id === updated.id) {
-        setSelectedComplaint(updated);
+      if (updated.department !== undefined || updated.priority !== undefined || updated.adminComments !== undefined) {
+        const body = {
+          status: updated.status,
+          ...(updated.priority ? { priority: updated.priority } : {}),
+          ...(updated.department ? { department: updated.department } : {}),
+          ...(updated.adminComments ? { adminComments: updated.adminComments } : {})
+        };
+        await apiClient.complaints.updateStatus(updated.db_id || updated.id, body);
       }
+
+      setComplaints(prev => prev.map(c => (c.id === updated.id || c.db_id === updated.db_id ? { ...c, ...updated } : c)));
+      if (selectedComplaint && (selectedComplaint.id === updated.id || selectedComplaint.db_id === updated.db_id)) {
+        setSelectedComplaint(prev => ({ ...prev, ...updated }));
+      }
+      syncData();
       return { success: true };
     } catch (err) {
+      console.warn('Admin handleUpdateComplaint error:', err);
       return { success: false, error: err.message || 'Failed to update complaint' };
     }
   };
@@ -344,6 +345,7 @@ export default function AdminDashboard({ onLogout }) {
                 complaint={selectedComplaint}
                 onClose={() => setSelectedComplaint(null)}
                 onUpdateComplaint={handleUpdateComplaint}
+                isStaffView={false}
               />
             )}
           </>

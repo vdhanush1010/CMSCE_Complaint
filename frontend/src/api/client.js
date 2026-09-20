@@ -5,15 +5,28 @@ function getAuthToken() {
   if (typeof window === 'undefined') return null;
   const path = window.location.pathname || '';
   if (path.startsWith('/admin')) {
-    return localStorage.getItem('admin_token');
-  }
-  if (path.startsWith('/staff') || path.startsWith('/department')) {
-    return localStorage.getItem('dept_token');
-  }
-  if (path.startsWith('/office')) {
     return localStorage.getItem('admin_token') || localStorage.getItem('dept_token');
   }
-  return localStorage.getItem('cmsce_student_token');
+  if (path.startsWith('/staff') || path.startsWith('/department')) {
+    return localStorage.getItem('dept_token') || localStorage.getItem('admin_token');
+  }
+  if (path.startsWith('/office')) {
+    try {
+      const adminUser = JSON.parse(localStorage.getItem('admin_user') || 'null');
+      if (adminUser?.role === 'ADMIN') return localStorage.getItem('admin_token');
+      const deptUser = JSON.parse(localStorage.getItem('dept_user') || 'null');
+      if (deptUser) return localStorage.getItem('dept_token');
+    } catch (_) {}
+    return localStorage.getItem('dept_token') || localStorage.getItem('admin_token');
+  }
+
+  const deptToken = localStorage.getItem('dept_token');
+  const adminToken = localStorage.getItem('admin_token');
+  const studentToken = localStorage.getItem('cmsce_student_token');
+
+  if (deptToken && !studentToken && !adminToken) return deptToken;
+  if (adminToken && !studentToken) return adminToken;
+  return studentToken || deptToken || adminToken;
 }
 
 /**
@@ -124,11 +137,26 @@ export const apiClient = {
     },
     track: (ticketId) => apiClient.get(`/api/complaints/track/${ticketId}`),
     create: (data) => apiClient.post('/api/complaints', data),
-    updateStatus: (id, payload) => apiClient.patch(`/api/complaints/${id}/status`, payload),
-    submitFeedback: (id, payload) => apiClient.post(`/api/complaints/${id}/feedback`, payload),
-    reopen: (id, payload) => apiClient.post(`/api/complaints/${id}/reopen`, payload),
-    appeal: (id, payload) => apiClient.post(`/api/complaints/${id}/appeal`, payload),
-    close: (id, payload) => apiClient.post(`/api/complaints/${id}/close`, payload)
+    updateStatus: (id, payload, options = {}) => {
+      const token = options.token || localStorage.getItem('dept_token') || localStorage.getItem('admin_token') || getAuthToken();
+      return apiClient.patch(`/api/complaints/${id}/status`, payload, { token, ...options });
+    },
+    submitFeedback: (id, payload, options = {}) => {
+      const token = options.token || localStorage.getItem('cmsce_student_token') || getAuthToken();
+      return apiClient.post(`/api/complaints/${id}/feedback`, payload, { token, ...options });
+    },
+    reopen: (id, payload, options = {}) => {
+      const token = options.token || localStorage.getItem('admin_token') || getAuthToken();
+      return apiClient.post(`/api/complaints/${id}/reopen`, payload, { token, ...options });
+    },
+    appeal: (id, payload, options = {}) => {
+      const token = options.token || localStorage.getItem('cmsce_student_token') || getAuthToken();
+      return apiClient.post(`/api/complaints/${id}/appeal`, payload, { token, ...options });
+    },
+    close: (id, payload, options = {}) => {
+      const token = options.token || localStorage.getItem('admin_token') || getAuthToken();
+      return apiClient.post(`/api/complaints/${id}/close`, payload, { token, ...options });
+    }
   },
 
   // Departments
