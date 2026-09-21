@@ -423,6 +423,13 @@ export default function DepartmentControlPanel({
               <span className={`text-xs px-2.5 py-0.5 rounded-full border font-bold ${statusStyle}`}>
                 {complaint.status}
               </span>
+              <span className={`text-xs px-2.5 py-0.5 rounded-full border font-bold ${
+                complaint.priority?.toUpperCase() === 'CRITICAL'
+                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+              }`}>
+                {complaint.priority?.toUpperCase() === 'CRITICAL' ? 'CRITICAL: 12 Hours' : 'HIGH / MEDIUM / LOW: 48 Hours'}
+              </span>
               {appealCycle > 0 && (
                 <span className="text-xs px-2.5 py-0.5 bg-amber-500 text-white font-black rounded-full flex items-center gap-1 shadow-xs">
                   <Scale className="w-3.5 h-3.5" /> Appeal Cycle #{appealCycle}
@@ -466,6 +473,10 @@ export default function DepartmentControlPanel({
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <Calendar className="w-4 h-4 text-slate-400" />
                   <span>Assigned Unit: <strong>{complaint.assignedDept} Operations</strong></span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <Clock className="w-4 h-4 text-slate-400" />
+                  <span>SLA Target: <strong>{complaint.priority?.toUpperCase() === 'CRITICAL' ? 'CRITICAL: 12 Hours' : 'HIGH / MEDIUM / LOW: 48 Hours'}</strong></span>
                 </div>
               </div>
 

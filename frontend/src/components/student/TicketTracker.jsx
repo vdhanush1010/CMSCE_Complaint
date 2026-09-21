@@ -113,7 +113,7 @@ export default function TicketTracker({ ticketId = '', onBack }) {
 
   // Live SLA Countdown decrement (supports original and extended SLA deadline)
   useEffect(() => {
-    const deadline = complaint?.slaExtendedUntil || complaint?.sla_deadline_at;
+    const deadline = complaint?.slaExtendedUntil || complaint?.slaDeadline || complaint?.sla_deadline_at;
     if (!deadline) return;
 
     const updateCountdown = () => {
@@ -134,7 +134,7 @@ export default function TicketTracker({ ticketId = '', onBack }) {
     updateCountdown();
     const timer = setInterval(updateCountdown, 1000);
     return () => clearInterval(timer);
-  }, [complaint?.slaExtendedUntil, complaint?.sla_deadline_at]);
+  }, [complaint?.slaExtendedUntil, complaint?.slaDeadline, complaint?.sla_deadline_at]);
 
   const isReopenedTicket = Boolean(
     complaint?.isReopened ||
@@ -333,7 +333,9 @@ export default function TicketTracker({ ticketId = '', onBack }) {
             <span className="text-[10px] text-slate-300 block mt-0.5">
               {timeLeft.isExpired 
                 ? 'SLA Deadline Expired' 
-                : 'SLA Target Window'}
+                : complaint.priority?.toUpperCase() === 'CRITICAL'
+                ? 'Target: CRITICAL: 12 Hours'
+                : 'Target: HIGH / MEDIUM / LOW: 48 Hours'}
             </span>
           </div>
         </div>

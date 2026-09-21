@@ -122,7 +122,7 @@ export default function ComplaintDesk({ user, onTicketCreated }) {
       ai_confidence_score: 85,
       reasoning: `Categorized into ${deptNames[bestDept] || bestDept} via institutional triage rules (Fallback Mode).`,
       ai_routing_reasoning: `Categorized into ${deptNames[bestDept] || bestDept} via institutional triage rules (Fallback Mode).`,
-      sla_hours: priority === 'CRITICAL' ? 4 : 24,
+      sla_hours: priority === 'CRITICAL' ? 12 : 48,
       is_fallback: true
     };
   };
@@ -180,7 +180,7 @@ export default function ComplaintDesk({ user, onTicketCreated }) {
         priority: targetPriority,
         ai_confidence_score: aiResult?.ai_confidence_score || 85,
         ai_routing_reasoning: aiResult?.reasoning || 'Categorized and filed successfully.',
-        sla_hours: aiResult?.sla_hours || 24,
+        sla_hours: aiResult?.sla_hours || (targetPriority === 'CRITICAL' ? 12 : 48),
         attachments: attachments
       });
 
@@ -214,6 +214,14 @@ export default function ComplaintDesk({ user, onTicketCreated }) {
           <p className="text-xs text-slate-300 mt-1 max-w-xl">
             Describe your complaint in natural language. Our AI engine will automatically evaluate priority, detect safety hazards, and assign the appropriate department.
           </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-bold">
+            <span className="px-2.5 py-1 bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-lg">
+              CRITICAL: 12 Hours
+            </span>
+            <span className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg">
+              HIGH / MEDIUM / LOW: 48 Hours
+            </span>
+          </div>
         </div>
       </div>
 

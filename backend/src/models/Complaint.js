@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { getSlaHours, calculateSlaDeadline } from '../services/slaService.js';
 
 const complaintSchema = new mongoose.Schema(
   {
@@ -118,9 +119,12 @@ const complaintSchema = new mongoose.Schema(
     },
     sla_hours: {
       type: Number,
-      default: 24
+      default: 48
     },
     sla_deadline_at: {
+      type: Date
+    },
+    slaDeadline: {
       type: Date
     },
     slaExtendedUntil: {
@@ -293,19 +297,38 @@ complaintSchema.pre('save', function (next) {
     this.status = STAGE_TO_STATUS[this.stage] || 'Submitted';
   }
 
-  if (!this.sla_deadline_at && this.sla_hours) {
-    const deadline = new Date(this.createdAt || Date.now());
-    deadline.setHours(deadline.getHours() + this.sla_hours);
+  // SLA hour mapping & deadline calculation:
+  // Strictly: CRITICAL = 12h, all other priorities (HIGH, MEDIUM, LOW) = 48h
+  const targetSlaHours = getSlaHours(this.priority);
+  if (!this.sla_hours || this.isModified('priority')) {
+    this.sla_hours = targetSlaHours;
+  }
+
+  // Calculate slaDeadline: new Date(baseTime + hours * 60 * 60 * 1000)
+  if ((!this.sla_deadline_at && !this.slaDeadline) || this.isModified('priority')) {
+    const baseTime = this.createdAt || Date.now();
+    const deadline = calculateSlaDeadline(this.sla_hours, baseTime);
+    this.slaDeadline = deadline;
     this.sla_deadline_at = deadline;
+  } else {
+    // Keep slaDeadline and sla_deadline_at synchronized
+    if (this.sla_deadline_at && !this.slaDeadline) {
+      this.slaDeadline = this.sla_deadline_at;
+    } else if (this.slaDeadline && !this.sla_deadline_at) {
+      this.sla_deadline_at = this.slaDeadline;
+    }
   }
-  if (this.slaExtendedUntil && !this.sla_deadline_at) {
-    this.sla_deadline_at = this.slaExtendedUntil;
+
+  if (this.slaExtendedUntil) {
+    if (!this.sla_deadline_at || this.sla_deadline_at < this.slaExtendedUntil) {
+      this.sla_deadline_at = this.slaExtendedUntil;
+      this.slaDeadline = this.slaExtendedUntil;
+    }
   }
-  if (this.sla_deadline_at && !this.slaExtendedUntil) {
-    this.slaExtendedUntil = this.sla_deadline_at;
-  }
-  if (this.sla_deadline_at) {
-    const isPast = new Date() > new Date(this.sla_deadline_at) && !['Resolved', 'Closed', 'RESOLVED'].includes(this.status);
+
+  const effectiveDeadline = this.slaDeadline || this.sla_deadline_at;
+  if (effectiveDeadline) {
+    const isPast = new Date() > new Date(effectiveDeadline) && !['Resolved', 'Closed', 'RESOLVED'].includes(this.status);
     this.is_sla_breached = isPast;
     this.isSlaBreached = isPast;
   }

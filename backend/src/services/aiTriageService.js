@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { getSlaHours } from './slaService.js';
 
 const DEPARTMENT_METADATA = {
   CANTEEN: { name: 'Canteen Operations', defaultSla: 4, category: 'Food Safety & Mess Facilities' },
@@ -152,7 +153,7 @@ export function getHeuristicTriage({ title = '', description = '', category_hint
   }
 
   const deptMeta = DEPARTMENT_METADATA[assignedDept] || DEPARTMENT_METADATA.HOSPITALITY;
-  const slaHours = priority === 'CRITICAL' ? 4 : deptMeta.defaultSla;
+  const slaHours = getSlaHours(priority);
 
   return {
     isValid: true,
@@ -310,9 +311,7 @@ Return ONLY a strict JSON object matching the schema above.`;
     : 0.95;
   const normalizedPercentageScore = Number((normalizedDecimalScore * 100).toFixed(1));
 
-  const slaHours = validPriority === 'CRITICAL'
-    ? 4
-    : (DEPARTMENT_METADATA[validDept]?.defaultSla || 24);
+  const slaHours = getSlaHours(validPriority);
 
   return {
     isValid: true,

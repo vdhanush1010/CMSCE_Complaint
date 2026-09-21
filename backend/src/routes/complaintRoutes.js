@@ -2,6 +2,7 @@ import express from 'express';
 import { Complaint } from '../models/Complaint.js';
 import { Department } from '../models/Department.js';
 import { triageComplaint, getHeuristicTriage } from '../services/aiTriageService.js';
+import { getSlaHours, calculateSlaDeadline } from '../services/slaService.js';
 import { optionalAuth, protect } from '../middleware/auth.js';
 import { reopenComplaint, getComplaints, appealComplaint, closeComplaint, updateStatus } from '../controllers/complaintController.js';
 
@@ -117,17 +118,14 @@ router.post('/', optionalAuth, async (req, res) => {
         finalSlaHours = fallback.sla_hours;
       }
     } else {
-      const deptDoc = await Department.findOne({ code: finalDept.toUpperCase() });
-      if (deptDoc) {
-        finalDeptName = deptDoc.name;
-        if (!finalSlaHours) finalSlaHours = deptDoc.slaHours;
-      }
-    }
+    // Calculate priority SLA: Strictly 12 hours for CRITICAL and 48 hours for HIGH / MEDIUM / LOW
+    finalPriority = (finalPriority || 'MEDIUM').toUpperCase();
+    finalSlaHours = getSlaHours(finalPriority);
 
     const ticket_id = await generateUniqueTicketId();
 
     const now = new Date();
-    const deadline = new Date(now.getTime() + (finalSlaHours || 24) * 60 * 60 * 1000);
+    const deadline = calculateSlaDeadline(finalSlaHours, now);
 
     const studentName = is_anonymous ? 'Anonymous' : req.user ? req.user.name : 'Student User';
     const studentRoll = req.user ? req.user.roll_number || '2026-STU' : '2026-STU';
@@ -159,8 +157,9 @@ router.post('/', optionalAuth, async (req, res) => {
       student_roll: studentRoll,
       ai_confidence_score: finalConfidence || 95.0,
       ai_routing_reasoning: finalReasoning || 'AI triage processed and assigned ticket.',
-      sla_hours: finalSlaHours || 24,
+      sla_hours: finalSlaHours,
       sla_deadline_at: deadline,
+      slaDeadline: deadline,
       is_sla_breached: false,
       attachments: safeAttachments,
       proofs: safeProofs,
@@ -210,8 +209,10 @@ router.get('/track/:ticketId', async (req, res) => {
     }
 
     const now = new Date();
-    if (complaint.sla_deadline_at) {
-      complaint.is_sla_breached = now > new Date(complaint.sla_deadline_at) && !['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(complaint.status);
+    const effectiveDeadline = complaint.slaDeadline || complaint.sla_deadline_at;
+    if (effectiveDeadline) {
+      complaint.is_sla_breached = now > new Date(effectiveDeadline) && !['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(complaint.status);
+      complaint.isSlaBreached = complaint.is_sla_breached;
     }
 
     return res.json(complaint.toJSON());

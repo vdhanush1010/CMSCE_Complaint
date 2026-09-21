@@ -187,7 +187,7 @@ export default function MyComplaints({ onSelectTicket }) {
                 </div>
                 <div className="flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5 text-slate-400" />
-                  <span>SLA: <strong>{quickViewComplaint.sla_hours || 24}h</strong></span>
+                  <span>SLA: <strong>{quickViewComplaint.priority?.toUpperCase() === 'CRITICAL' ? 'CRITICAL: 12 Hours' : 'HIGH / MEDIUM / LOW: 48 Hours'}</strong></span>
                 </div>
               </div>
 

@@ -101,6 +101,13 @@ export default function AIRoutingModal({ isOpen, onClose, aiResult, onConfirmSub
             <span className="text-slate-400">Match Confidence:</span>
             <span className="font-mono font-bold text-emerald-400 text-sm">{displayScore}% Match</span>
           </div>
+
+          <div className="mt-2 pt-2 border-t border-slate-800/80 flex justify-between items-center text-xs">
+            <span className="text-slate-400">SLA Standard:</span>
+            <span className="font-bold text-amber-300 text-xs">
+              {aiResult.priority?.toUpperCase() === 'CRITICAL' ? 'CRITICAL: 12 Hours' : 'HIGH / MEDIUM / LOW: 48 Hours'}
+            </span>
+          </div>
           
           <div className="mt-2 text-xs text-slate-300 italic bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
             "{aiResult.reasoning || aiResult.ai_routing_reasoning || 'AI routing engine processed ticket.'}"

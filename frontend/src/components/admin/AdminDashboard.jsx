@@ -116,7 +116,7 @@ const isMatchingComplaint = (a, b) => {
       if (Array.isArray(data)) {
         const mapped = data.map(item => {
           const now = new Date();
-          const deadline = item.sla_deadline_at ? new Date(item.sla_deadline_at) : now;
+          const deadline = (item.slaExtendedUntil || item.slaDeadline || item.sla_deadline_at) ? new Date(item.slaExtendedUntil || item.slaDeadline || item.sla_deadline_at) : now;
           const diffHours = Math.round((deadline - now) / (1000 * 3600));
 
           return {

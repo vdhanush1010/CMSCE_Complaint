@@ -40,7 +40,7 @@ export async function reopenComplaint(req, res) {
     const isOverdue = Boolean(
       complaint.is_sla_breached ||
       complaint.isSlaBreached ||
-      (complaint.sla_deadline_at && now > new Date(complaint.sla_deadline_at) && !['Resolved', 'Closed', 'RESOLVED'].includes(complaint.status))
+      ((complaint.slaDeadline || complaint.sla_deadline_at) && now > new Date(complaint.slaDeadline || complaint.sla_deadline_at) && !['Resolved', 'Closed', 'RESOLVED'].includes(complaint.status))
     );
     const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED', 'APPEALED'].includes(complaint.status);
 
@@ -64,6 +64,7 @@ export async function reopenComplaint(req, res) {
     complaint.is_sla_breached = false;
     complaint.isSlaBreached = false;
     complaint.sla_deadline_at = newDeadline;
+    complaint.slaDeadline = newDeadline;
     complaint.slaExtendedUntil = newDeadline;
     complaint.sla_hours = extHours;
 

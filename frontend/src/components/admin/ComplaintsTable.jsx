@@ -91,28 +91,39 @@ export default function ComplaintsTable({
     );
   };
 
-  const getSLATimerBadge = (hoursLeft, isOverdue) => {
+  const getSLATimerBadge = (hoursLeft, isOverdue, priority = '') => {
+    const isCritical = (priority || '').toUpperCase() === 'CRITICAL';
+    const targetLabel = isCritical ? 'CRITICAL: 12 Hours' : 'HIGH / MEDIUM / LOW: 48 Hours';
     if (isOverdue) {
       return (
-        <span className="inline-flex items-center gap-1 text-rose-600 font-semibold text-xs bg-rose-50 px-2 py-1 rounded-md border border-rose-100">
-          <AlertCircle className="h-3 w-3" />
-          Overdue {Math.abs(hoursLeft)}h
-        </span>
+        <div className="flex flex-col" title={`Target Window: ${targetLabel}`}>
+          <span className="inline-flex items-center gap-1 text-rose-600 font-semibold text-xs bg-rose-50 px-2 py-1 rounded-md border border-rose-100">
+            <AlertCircle className="h-3 w-3" />
+            Overdue {Math.abs(hoursLeft)}h
+          </span>
+          <span className="text-[10px] text-slate-400 font-semibold mt-0.5">{isCritical ? '12h Target' : '48h Target'}</span>
+        </div>
       );
     }
     if (hoursLeft <= 3) {
       return (
-        <span className="inline-flex items-center gap-1 text-amber-600 font-semibold text-xs bg-amber-50 px-2 py-1 rounded-md border border-amber-100">
-          <Clock className="h-3 w-3 animate-pulse" />
-          {hoursLeft}h left
-        </span>
+        <div className="flex flex-col" title={`Target Window: ${targetLabel}`}>
+          <span className="inline-flex items-center gap-1 text-amber-600 font-semibold text-xs bg-amber-50 px-2 py-1 rounded-md border border-amber-100">
+            <Clock className="h-3 w-3 animate-pulse" />
+            {hoursLeft}h left
+          </span>
+          <span className="text-[10px] text-slate-400 font-semibold mt-0.5">{isCritical ? '12h Target' : '48h Target'}</span>
+        </div>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 text-slate-500 text-xs bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
-        <Clock className="h-3 w-3" />
-        {hoursLeft}h left
-      </span>
+      <div className="flex flex-col" title={`Target Window: ${targetLabel}`}>
+        <span className="inline-flex items-center gap-1 text-slate-500 text-xs bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+          <Clock className="h-3 w-3" />
+          {hoursLeft}h left
+        </span>
+        <span className="text-[10px] text-slate-400 font-semibold mt-0.5">{isCritical ? '12h Target' : '48h Target'}</span>
+      </div>
     );
   };
 
@@ -188,7 +199,7 @@ export default function ComplaintsTable({
                       {getStageBadge(complaint.stage, complaint.status)}
                     </td>
                     <td className="px-5 py-3.5">
-                      {getSLATimerBadge(complaint.slaHoursLeft, complaint.isSlaOverdue)}
+                      {getSLATimerBadge(complaint.slaHoursLeft, complaint.isSlaOverdue, complaint.priority)}
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       <div className="inline-flex items-center gap-2 justify-end">
