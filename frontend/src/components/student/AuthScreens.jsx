@@ -101,7 +101,7 @@ export default function AuthScreens({ screen = 'LOGIN', onNavigate, onLoginSucce
   return (
     <div className="min-h-[80vh] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border border-slate-100">
-        
+
         {/* Header */}
         <div className="text-center mb-8">
           <CMSLotusLogo className="w-16 h-16 mx-auto mb-3" />
@@ -216,7 +216,7 @@ export default function AuthScreens({ screen = 'LOGIN', onNavigate, onLoginSucce
                   required
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. Priya Sharma"
+                  placeholder="Enter Your Full Name"
                   className="w-full pl-9 p-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
               </div>
@@ -233,7 +233,7 @@ export default function AuthScreens({ screen = 'LOGIN', onNavigate, onLoginSucce
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. priya@cmsce.edu"
+                  placeholder="Enter Your College Email ID"
                   className="w-full pl-9 p-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
               </div>
@@ -249,7 +249,7 @@ export default function AuthScreens({ screen = 'LOGIN', onNavigate, onLoginSucce
                   required
                   value={regNumber}
                   onChange={(e) => setRegNumber(e.target.value)}
-                  placeholder="e.g. 2026-CSE-105"
+                  placeholder="Enter Your Reg No"
                   className="w-full p-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
               </div>
@@ -262,7 +262,7 @@ export default function AuthScreens({ screen = 'LOGIN', onNavigate, onLoginSucce
                   required
                   value={department}
                   onChange={(e) => setDepartment(e.target.value)}
-                  placeholder="e.g., CSE, Mechanical, AI&DS, ECE"
+                  placeholder="Enter Your Department"
                   className="w-full p-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
               </div>
@@ -279,7 +279,7 @@ export default function AuthScreens({ screen = 'LOGIN', onNavigate, onLoginSucce
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Create A Password"
                   className="w-full pl-9 pr-9 p-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
                 <button
