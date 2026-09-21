@@ -59,6 +59,50 @@ export default function AdminDashboard({ onLogout }) {
     localStorage.removeItem('selectedDepartment');
   }, []);
 
+const STATUS_TO_CANONICAL_STAGE = {
+  'Submitted': 'SUBMITTED',
+  'SUBMITTED': 'SUBMITTED',
+  'AI Analysed': 'AI_ANALYSED',
+  'AI_ANALYSED': 'AI_ANALYSED',
+  'Assigned': 'ASSIGNED',
+  'ASSIGNED': 'ASSIGNED',
+  'In Progress': 'IN_PROGRESS',
+  'IN_PROGRESS': 'IN_PROGRESS',
+  'Resolution Pending Verification': 'PENDING_VERIFICATION',
+  'Pending Verification': 'PENDING_VERIFICATION',
+  'PENDING_VERIFICATION': 'PENDING_VERIFICATION',
+  'Resolved': 'RESOLVED',
+  'RESOLVED': 'RESOLVED',
+  'Closed': 'RESOLVED',
+  'CLOSED': 'RESOLVED',
+  'Reopened': 'IN_PROGRESS',
+  'REOPENED': 'IN_PROGRESS',
+  'Appealed': 'SUBMITTED',
+  'APPEALED': 'SUBMITTED'
+};
+
+const resolveCanonicalStage = (stage, status) => {
+  if (stage && STATUS_TO_CANONICAL_STAGE[stage]) return STATUS_TO_CANONICAL_STAGE[stage];
+  if (status && STATUS_TO_CANONICAL_STAGE[status]) return STATUS_TO_CANONICAL_STAGE[status];
+  const s = (stage || status || '').toUpperCase();
+  if (s.includes('RESOLV') || s.includes('CLOSE')) return 'RESOLVED';
+  if (s.includes('VERIF') || s.includes('PENDING')) return 'PENDING_VERIFICATION';
+  if (s.includes('IN_PROGRESS') || s === 'IN PROGRESS') return 'IN_PROGRESS';
+  if (s.includes('ASSIGN')) return 'ASSIGNED';
+  if (s.includes('AI') || s.includes('ANALYSE')) return 'AI_ANALYSED';
+  return 'SUBMITTED';
+};
+
+const isMatchingComplaint = (a, b) => {
+  if (!a || !b) return false;
+  return (
+    (a.id && (a.id === b.id || a.id === b.ticket_id || a.id === b.db_id)) ||
+    (a.db_id && (a.db_id === b.db_id || a.db_id === b.id || a.db_id === b._id)) ||
+    (a._id && (a._id === b.db_id || a._id === b.id || a._id === b._id)) ||
+    (a.ticket_id && (a.ticket_id === b.id || a.ticket_id === b.ticket_id))
+  );
+};
+
   const syncData = async () => {
     const activeTok = token || localStorage.getItem('admin_token');
     if (!activeTok) {
@@ -83,7 +127,7 @@ export default function AdminDashboard({ onLogout }) {
             assignedDept: item.assigned_department_code || item.department || 'CANTEEN',
             priority: (item.priority || 'MEDIUM').toUpperCase(),
             status: item.status || 'Submitted',
-            stage: item.stage || (item.status === 'Resolved' ? 'RESOLVED' : item.status === 'In Progress' ? 'IN_PROGRESS' : 'SUBMITTED'),
+            stage: resolveCanonicalStage(item.stage, item.status),
             slaHoursLeft: diffHours,
             isSlaOverdue: Boolean(item.is_sla_breached) || diffHours < 0,
             studentName: item.is_anonymous ? 'Anonymous' : (item.student_name || 'Student User'),
@@ -111,6 +155,11 @@ export default function AdminDashboard({ onLogout }) {
         });
 
         setComplaints(mapped);
+        setSelectedComplaint(prev => {
+          if (!prev) return null;
+          const fresh = mapped.find(c => isMatchingComplaint(c, prev));
+          return fresh ? { ...prev, ...fresh } : prev;
+        });
         setLoading(false);
       }
     } catch (err) {
@@ -137,7 +186,7 @@ export default function AdminDashboard({ onLogout }) {
 
   const handleUpdateComplaint = async (updated) => {
     try {
-      if (updated.department !== undefined || updated.priority !== undefined || updated.adminComments !== undefined) {
+      if (updated._needsApiCall) {
         const body = {
           status: updated.status,
           ...(updated.priority ? { priority: updated.priority } : {}),
@@ -147,11 +196,9 @@ export default function AdminDashboard({ onLogout }) {
         await apiClient.complaints.updateStatus(updated.db_id || updated.id, body);
       }
 
-      setComplaints(prev => prev.map(c => (c.id === updated.id || c.db_id === updated.db_id ? { ...c, ...updated } : c)));
-      if (selectedComplaint && (selectedComplaint.id === updated.id || selectedComplaint.db_id === updated.db_id)) {
-        setSelectedComplaint(prev => ({ ...prev, ...updated }));
-      }
-      syncData();
+      setComplaints(prev => prev.map(c => (isMatchingComplaint(c, updated) ? { ...c, ...updated } : c)));
+      setSelectedComplaint(prev => (isMatchingComplaint(prev, updated) ? { ...prev, ...updated } : prev));
+      await syncData();
       return { success: true };
     } catch (err) {
       console.warn('Admin handleUpdateComplaint error:', err);
@@ -240,7 +287,7 @@ export default function AdminDashboard({ onLogout }) {
     let matchesKpi = true;
     if (kpiFilter === 'OPEN') {
       // Tickets where status is NOT Resolved
-      matchesKpi = !['Resolved', 'Closed'].includes(item.status);
+      matchesKpi = !['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(item.status) && item.stage !== 'RESOLVED';
     } else if (kpiFilter === 'CRITICAL') {
       // Tickets with priority CRITICAL
       matchesKpi = (item.priority || '').toUpperCase() === 'CRITICAL';
@@ -249,7 +296,7 @@ export default function AdminDashboard({ onLogout }) {
       matchesKpi = Boolean(item.isSlaOverdue || item.is_sla_breached || item.slaHoursLeft < 0);
     } else if (kpiFilter === 'RESOLVED') {
       // Tickets with status Resolved
-      matchesKpi = ['Resolved', 'Closed'].includes(item.status);
+      matchesKpi = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(item.status) || item.stage === 'RESOLVED';
     }
 
     return matchesSearch && matchesDept && matchesKpi;

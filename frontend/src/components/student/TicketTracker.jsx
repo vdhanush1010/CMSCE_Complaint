@@ -697,11 +697,11 @@ export default function TicketTracker({ ticketId = '', onBack }) {
       {/* Attachment Preview Modal */}
       {previewAttachment && (
         <div 
-          className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
           onClick={() => setPreviewAttachment(null)}
         >
           <div 
-            className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200"
+            className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200 relative z-[10000]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}

@@ -213,12 +213,23 @@ export default function DepartmentControlPanel({
       };
 
       const res = await apiClient.complaints.updateStatus(targetId, body);
-      const updated = res.complaint || {
+      const serverComp = res.complaint || {};
+      const updated = {
         ...complaint,
+        ...serverComp,
+        id: complaint.id || serverComp.ticket_id || serverComp.id,
+        db_id: complaint.db_id || serverComp.id || serverComp._id,
         stage: targetStage,
         status: targetStatus,
-        ...(proof ? { resolutionProof: proof } : {}),
-        ...(notes ? { resolutionNotes: notes, resolution_notes: notes } : {})
+        assignedDept: complaint.assignedDept || serverComp.assigned_department_code || serverComp.department,
+        studentName: complaint.studentName || serverComp.student_name,
+        studentRoll: complaint.studentRoll || serverComp.student_roll,
+        slaHoursLeft: complaint.slaHoursLeft,
+        isSlaOverdue: complaint.isSlaOverdue,
+        resolutionProof: proof || serverComp.resolutionProof || complaint.resolutionProof,
+        resolution_proof_url: (proof && typeof proof === 'string') ? proof : (serverComp.resolution_proof_url || complaint.resolution_proof_url),
+        resolutionNotes: notes !== undefined ? notes : (serverComp.resolutionNotes || complaint.resolutionNotes),
+        timeline: serverComp.timeline || complaint.timeline
       };
 
       if (onUpdateComplaint) {
@@ -310,7 +321,9 @@ export default function DepartmentControlPanel({
       },
     ];
 
-    onUpdateComplaint({ ...complaint, adminComments: updatedComments });
+    if (onUpdateComplaint) {
+      onUpdateComplaint({ ...complaint, adminComments: updatedComments, _needsApiCall: true });
+    }
     setComment('');
   };
 
@@ -325,12 +338,15 @@ export default function DepartmentControlPanel({
 
   const handleReRoute = (newDept) => {
     setSelectedDept(newDept);
-    onUpdateComplaint({
-      ...complaint,
-      department: newDept,
-      assignedDept: newDept,
-      routingReasoning: `Manually re-routed by Staff/Admin to ${departments.find((d) => d.code === newDept)?.label || newDept}.`,
-    });
+    if (onUpdateComplaint) {
+      onUpdateComplaint({
+        ...complaint,
+        department: newDept,
+        assignedDept: newDept,
+        routingReasoning: `Manually re-routed by Staff/Admin to ${departments.find((d) => d.code === newDept)?.label || newDept}.`,
+        _needsApiCall: true
+      });
+    }
   };
 
   const nextTransitionInfo = !isAppealed && !isResolved ? NEXT_STAGE_MAP[currentStageKey] : null;
@@ -1067,11 +1083,11 @@ export default function DepartmentControlPanel({
       {/* Full Resolution Attachment Preview Modal */}
       {previewAttachment && (
         <div 
-          className="fixed inset-0 z-60 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200"
           onClick={() => setPreviewAttachment(null)}
         >
           <div 
-            className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200"
+            className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200 relative z-[10000]"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}

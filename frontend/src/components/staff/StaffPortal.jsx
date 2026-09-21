@@ -53,6 +53,50 @@ export default function StaffPortal({ token: initialToken, user: initialUser, on
 
   const userDept = (user?.department || '').toUpperCase();
 
+const STATUS_TO_CANONICAL_STAGE = {
+  'Submitted': 'SUBMITTED',
+  'SUBMITTED': 'SUBMITTED',
+  'AI Analysed': 'AI_ANALYSED',
+  'AI_ANALYSED': 'AI_ANALYSED',
+  'Assigned': 'ASSIGNED',
+  'ASSIGNED': 'ASSIGNED',
+  'In Progress': 'IN_PROGRESS',
+  'IN_PROGRESS': 'IN_PROGRESS',
+  'Resolution Pending Verification': 'PENDING_VERIFICATION',
+  'Pending Verification': 'PENDING_VERIFICATION',
+  'PENDING_VERIFICATION': 'PENDING_VERIFICATION',
+  'Resolved': 'RESOLVED',
+  'RESOLVED': 'RESOLVED',
+  'Closed': 'RESOLVED',
+  'CLOSED': 'RESOLVED',
+  'Reopened': 'IN_PROGRESS',
+  'REOPENED': 'IN_PROGRESS',
+  'Appealed': 'SUBMITTED',
+  'APPEALED': 'SUBMITTED'
+};
+
+const resolveCanonicalStage = (stage, status) => {
+  if (stage && STATUS_TO_CANONICAL_STAGE[stage]) return STATUS_TO_CANONICAL_STAGE[stage];
+  if (status && STATUS_TO_CANONICAL_STAGE[status]) return STATUS_TO_CANONICAL_STAGE[status];
+  const s = (stage || status || '').toUpperCase();
+  if (s.includes('RESOLV') || s.includes('CLOSE')) return 'RESOLVED';
+  if (s.includes('VERIF') || s.includes('PENDING')) return 'PENDING_VERIFICATION';
+  if (s.includes('IN_PROGRESS') || s === 'IN PROGRESS') return 'IN_PROGRESS';
+  if (s.includes('ASSIGN')) return 'ASSIGNED';
+  if (s.includes('AI') || s.includes('ANALYSE')) return 'AI_ANALYSED';
+  return 'SUBMITTED';
+};
+
+const isMatchingComplaint = (a, b) => {
+  if (!a || !b) return false;
+  return (
+    (a.id && (a.id === b.id || a.id === b.ticket_id || a.id === b.db_id)) ||
+    (a.db_id && (a.db_id === b.db_id || a.db_id === b.id || a.db_id === b._id)) ||
+    (a._id && (a._id === b.db_id || a._id === b.id || a._id === b._id)) ||
+    (a.ticket_id && (a.ticket_id === b.id || a.ticket_id === b.ticket_id))
+  );
+};
+
   const mapItem = (item) => {
     const now = new Date();
     const deadline = item.sla_deadline_at ? new Date(item.sla_deadline_at) : now;
@@ -66,7 +110,7 @@ export default function StaffPortal({ token: initialToken, user: initialUser, on
       assignedDept: item.assigned_department_code || item.department || userDept,
       priority: (item.priority || 'MEDIUM').toUpperCase(),
       status: item.status || 'Submitted',
-      stage: item.stage || (item.status === 'Resolved' ? 'RESOLVED' : item.status === 'In Progress' ? 'IN_PROGRESS' : 'SUBMITTED'),
+      stage: resolveCanonicalStage(item.stage, item.status),
       slaHoursLeft: diffHours,
       isSlaOverdue: Boolean(item.is_sla_breached) || diffHours < 0,
       studentName: item.is_anonymous ? 'Anonymous' : (item.student_name || 'Student User'),
@@ -106,6 +150,11 @@ export default function StaffPortal({ token: initialToken, user: initialUser, on
       if (Array.isArray(data)) {
         const mapped = data.map(mapItem);
         setComplaints(mapped);
+        setSelectedComplaint((prev) => {
+          if (!prev) return null;
+          const fresh = mapped.find((c) => isMatchingComplaint(c, prev));
+          return fresh ? { ...prev, ...fresh } : prev;
+        });
         setLastSynced(new Date());
       }
     } catch (err) {
@@ -140,10 +189,8 @@ export default function StaffPortal({ token: initialToken, user: initialUser, on
 
   const handleUpdateComplaint = async (updated) => {
     try {
-      setComplaints((prev) => prev.map((c) => (c.id === updated.id || c.db_id === updated.db_id ? { ...c, ...updated } : c)));
-      if (selectedComplaint?.id === updated.id || selectedComplaint?.db_id === updated.db_id) {
-        setSelectedComplaint((prev) => ({ ...prev, ...updated }));
-      }
+      setComplaints((prev) => prev.map((c) => (isMatchingComplaint(c, updated) ? { ...c, ...updated } : c)));
+      setSelectedComplaint((prev) => (isMatchingComplaint(prev, updated) ? { ...prev, ...updated } : prev));
       // Re-fetch queue to guarantee all components and metrics are synchronized
       await syncData(false);
       return { success: true };
