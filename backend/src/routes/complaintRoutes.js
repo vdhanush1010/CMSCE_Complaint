@@ -1,7 +1,7 @@
 import express from 'express';
 import { Complaint } from '../models/Complaint.js';
 import { Department } from '../models/Department.js';
-import { triageComplaint } from '../services/aiTriageService.js';
+import { triageComplaint, getHeuristicTriage } from '../services/aiTriageService.js';
 import { optionalAuth, protect } from '../middleware/auth.js';
 import { reopenComplaint, getComplaints, appealComplaint, closeComplaint, updateStatus } from '../controllers/complaintController.js';
 
@@ -22,14 +22,15 @@ async function generateUniqueTicketId() {
 }
 
 // @route   POST /api/complaints/triage
-// @desc    Live Gemini AI triage endpoint
+// @desc    Live Gemini AI triage endpoint with heuristic fallback
 router.post('/triage', optionalAuth, async (req, res) => {
+  const { title = '', description = '', text = '', category = '' } = req.body || {};
+  const complaintText = description || text || title || '';
+  if (!complaintText.trim()) {
+    return res.status(400).json({ error: 'Complaint title or description is required for triage.' });
+  }
+
   try {
-    const { title, description, text, category } = req.body;
-    const complaintText = description || text || title || '';
-    if (!complaintText.trim()) {
-      return res.status(400).json({ error: 'Complaint title or description is required for triage.' });
-    }
     const triageResult = await triageComplaint({
       title: title || '',
       description: complaintText,
@@ -46,11 +47,9 @@ router.post('/triage', optionalAuth, async (req, res) => {
 
     return res.json(triageResult);
   } catch (err) {
-    console.error('[Complaints Triage Error]:', err.message);
-    return res.status(err.status || 500).json({
-      error: 'Gemini AI Analysis Service Unavailable',
-      detail: err.message
-    });
+    console.warn('[Complaints Triage Warning]: Falling back to heuristic triage:', err.message);
+    const fallback = getHeuristicTriage({ title, description: complaintText, category_hint: category });
+    return res.json(fallback);
   }
 });
 
@@ -90,21 +89,33 @@ router.post('/', optionalAuth, async (req, res) => {
     let finalSlaHours = sla_hours;
 
     if (!finalDept || !finalPriority) {
-      const aiResult = await triageComplaint({ title, description, category_hint: category });
-      if (aiResult.isValid === false) {
-        return res.status(400).json({
-          isValid: false,
-          error: aiResult.reasoning || 'The provided text does not contain a coherent or actionable campus grievance. Please provide specific details.',
-          detail: 'Invalid or non-grievance text detected.'
-        });
+      try {
+        const aiResult = await triageComplaint({ title, description, category_hint: category });
+        if (aiResult.isValid === false) {
+          return res.status(400).json({
+            isValid: false,
+            error: aiResult.reasoning || 'The provided text does not contain a coherent or actionable campus grievance. Please provide specific details.',
+            detail: 'Invalid or non-grievance text detected.'
+          });
+        }
+        finalDept = aiResult.assigned_dept_code;
+        finalDeptName = aiResult.department_name;
+        finalPriority = aiResult.priority;
+        finalCategory = finalCategory || aiResult.category;
+        finalConfidence = aiResult.ai_confidence_score;
+        finalReasoning = aiResult.reasoning;
+        finalSlaHours = aiResult.sla_hours;
+      } catch (aiErr) {
+        console.warn('[Complaint Create] AI triage error during complaint creation, falling back to heuristics:', aiErr.message);
+        const fallback = getHeuristicTriage({ title, description, category_hint: category });
+        finalDept = fallback.assigned_dept_code;
+        finalDeptName = fallback.department_name;
+        finalPriority = fallback.priority;
+        finalCategory = finalCategory || fallback.category;
+        finalConfidence = fallback.ai_confidence_score;
+        finalReasoning = fallback.reasoning;
+        finalSlaHours = fallback.sla_hours;
       }
-      finalDept = aiResult.assigned_dept_code;
-      finalDeptName = aiResult.department_name;
-      finalPriority = aiResult.priority;
-      finalCategory = finalCategory || aiResult.category;
-      finalConfidence = aiResult.ai_confidence_score;
-      finalReasoning = aiResult.reasoning;
-      finalSlaHours = aiResult.sla_hours;
     } else {
       const deptDoc = await Department.findOne({ code: finalDept.toUpperCase() });
       if (deptDoc) {

@@ -1,5 +1,5 @@
-import React from 'react';
-import { X, CheckCircle2, Utensils, Bus, Building2, Trophy, GraduationCap, ConciergeBell } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, CheckCircle2, Utensils, Bus, Building2, Trophy, GraduationCap, ConciergeBell, Info } from 'lucide-react';
 
 export default function AIRoutingModal({ isOpen, onClose, aiResult, onConfirmSubmit, isSubmitting }) {
   if (!isOpen || !aiResult) return null;
@@ -13,11 +13,17 @@ export default function AIRoutingModal({ isOpen, onClose, aiResult, onConfirmSub
     { code: 'HOSPITALITY', name: 'Hospitality', icon: ConciergeBell, bg: 'bg-rose-50 text-rose-700 border-rose-200' }
   ];
 
-  const assignedCode = (
+  const defaultCode = (
     aiResult.assigned_dept_code ||
     aiResult.department_code ||
     (aiResult.department_name ? aiResult.department_name.toUpperCase() : 'CANTEEN')
   ).toUpperCase();
+
+  const [selectedDept, setSelectedDept] = useState(defaultCode);
+
+  useEffect(() => {
+    setSelectedDept(defaultCode);
+  }, [defaultCode]);
 
   const confidenceScore = aiResult.ai_confidence_score || aiResult.confidence_score || 95;
   const displayScore = Math.round(confidenceScore > 1 ? confidenceScore : confidenceScore * 100);
@@ -28,6 +34,12 @@ export default function AIRoutingModal({ isOpen, onClose, aiResult, onConfirmSub
     MEDIUM: 'bg-amber-500 text-white',
     LOW: 'bg-emerald-500 text-white'
   }[aiResult.priority?.toUpperCase()] || 'bg-rose-500 text-white';
+
+  const handleConfirm = () => {
+    if (onConfirmSubmit) {
+      onConfirmSubmit(selectedDept, aiResult.priority);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
@@ -46,10 +58,29 @@ export default function AIRoutingModal({ isOpen, onClose, aiResult, onConfirmSub
             <CheckCircle2 className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-lg font-black text-slate-900">AI Routing Classification</h3>
-            <p className="text-xs text-slate-500 font-medium">Neural engine analyzed your complaint text</p>
+            <h3 className="text-lg font-black text-slate-900">
+              {aiResult.is_fallback ? 'Smart Rule Routing' : 'AI Routing Classification'}
+            </h3>
+            <p className="text-xs text-slate-500 font-medium">
+              {aiResult.is_fallback
+                ? 'Campus heuristic engine categorized your grievance'
+                : 'Neural engine analyzed your complaint text'}
+            </p>
           </div>
         </div>
+
+        {/* Fallback Notice if AI is offline */}
+        {aiResult.is_fallback && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl flex items-start gap-2">
+            <Info className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="font-bold block">Automated Rule-Based Assignment Active</span>
+              <span className="text-[11px] text-amber-700">
+                AI service was temporarily unavailable. Department assigned via institutional rules. Click any department below to adjust.
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* AI Result Card */}
         <div className="bg-slate-900 text-white rounded-xl p-4 mb-6 shadow-md border border-slate-800">
@@ -77,28 +108,33 @@ export default function AIRoutingModal({ isOpen, onClose, aiResult, onConfirmSub
         </div>
 
         {/* 6 Department Options Grid */}
-        <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Target Department Routing Grid</h4>
+        <div className="flex justify-between items-center mb-2">
+          <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Target Department Routing Grid</h4>
+          <span className="text-[10px] text-slate-400">Click to select/change</span>
+        </div>
         <div className="grid grid-cols-3 gap-2.5 mb-6">
           {departments.map((dept) => {
-            const isAssigned = dept.code === assignedCode;
+            const isAssigned = dept.code === selectedDept;
             const Icon = dept.icon;
             return (
-              <div
+              <button
+                type="button"
                 key={dept.code}
-                className={`p-3 rounded-xl border text-center transition flex flex-col items-center justify-center gap-1.5 ${
+                onClick={() => setSelectedDept(dept.code)}
+                className={`p-3 rounded-xl border text-center transition flex flex-col items-center justify-center gap-1.5 cursor-pointer text-left w-full ${
                   isAssigned
                     ? `${dept.bg} ring-2 ring-emerald-500 font-extrabold shadow-sm`
-                    : 'bg-slate-50 border-slate-200 text-slate-500 opacity-60'
+                    : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:border-slate-300'
                 }`}
               >
                 <Icon className="w-5 h-5" />
                 <span className="text-xs font-bold">{dept.name}</span>
                 {isAssigned && (
                   <span className="text-[9px] uppercase tracking-wider font-black bg-emerald-600 text-white px-1.5 py-0.2 rounded">
-                    Routed
+                    Selected
                   </span>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -113,7 +149,7 @@ export default function AIRoutingModal({ isOpen, onClose, aiResult, onConfirmSub
             Edit Text
           </button>
           <button
-            onClick={onConfirmSubmit}
+            onClick={handleConfirm}
             disabled={isSubmitting}
             className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow-lg flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -125,3 +161,4 @@ export default function AIRoutingModal({ isOpen, onClose, aiResult, onConfirmSub
     </div>
   );
 }
+
