@@ -93,9 +93,8 @@ export default function LoginScreen({ onLoginSuccess }) {
                 setIsStaff(false);
                 setError('');
               }}
-              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                !isStaff ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-200 hover:text-white'
-              }`}
+              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${!isStaff ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-200 hover:text-white'
+                }`}
             >
               <ShieldCheck className="w-3.5 h-3.5" /> Admin Portal
             </button>
@@ -105,9 +104,8 @@ export default function LoginScreen({ onLoginSuccess }) {
                 setIsStaff(true);
                 setError('');
               }}
-              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${
-                isStaff ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-200 hover:text-white'
-              }`}
+              className={`px-3 py-1.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1.5 ${isStaff ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-200 hover:text-white'
+                }`}
             >
               <UserCheck className="w-3.5 h-3.5" /> Staff Portal
             </button>
@@ -119,7 +117,7 @@ export default function LoginScreen({ onLoginSuccess }) {
       <main className="flex-1 flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
-            
+
             <div className={`${headerColor} px-8 py-6 text-center transition-colors duration-300`}>
               <div className="inline-flex items-center justify-center w-14 h-14 bg-white/10 rounded-full mb-3">
                 <Lock className={`w-7 h-7 ${isStaff ? 'text-indigo-200' : 'text-slate-300'}`} />
@@ -187,24 +185,7 @@ export default function LoginScreen({ onLoginSuccess }) {
                   </div>
                 </div>
 
-                <div className="flex justify-between items-center text-[11px] text-slate-400">
-                  <span>Demo quick-fill:</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isStaff) {
-                        setEmail('canteen@cmsce.edu');
-                        setPassword('staff123');
-                      } else {
-                        setEmail('admin@cmsce.edu');
-                        setPassword('admin123');
-                      }
-                    }}
-                    className="font-bold text-emerald-600 hover:underline cursor-pointer"
-                  >
-                    Auto-fill {isStaff ? 'Staff' : 'Admin'}
-                  </button>
-                </div>
+
 
                 <button
                   type="submit"
