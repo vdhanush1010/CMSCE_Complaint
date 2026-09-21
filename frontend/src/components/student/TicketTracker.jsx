@@ -28,6 +28,37 @@ const STAGES_6 = [
   { key: 'RESOLVED',             label: '6. Resolved' },
 ];
 
+const getRealResolutionProof = (comp) => {
+  if (!comp) return null;
+  const p = comp.resolutionProof;
+  const u = comp.resolution_proof_url;
+  if (p && typeof p === 'object') {
+    const fileData = p.fileData || p.url || '';
+    if (fileData && typeof fileData === 'string' && fileData.trim().length > 0) {
+      return {
+        fileName: p.fileName || 'Resolution Proof Photo',
+        fileData: fileData.trim(),
+        fileType: p.fileType || (fileData.startsWith('data:application/pdf') || p.fileName?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg')
+      };
+    }
+  }
+  if (p && typeof p === 'string' && p.trim().length > 0) {
+    return {
+      fileName: 'Resolution Proof Photo',
+      fileData: p.trim(),
+      fileType: p.startsWith('data:application/pdf') || p.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'
+    };
+  }
+  if (u && typeof u === 'string' && u.trim().length > 0) {
+    return {
+      fileName: 'Resolution Proof Photo',
+      fileData: u.trim(),
+      fileType: u.startsWith('data:application/pdf') || u.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'
+    };
+  }
+  return null;
+};
+
 export default function TicketTracker({ ticketId = '', onBack }) {
   const [complaint, setComplaint] = useState(null);
   const [timeLeft, setTimeLeft] = useState({ hours: 0, minutes: 0, seconds: 0, isExpired: false });
@@ -518,30 +549,34 @@ export default function TicketTracker({ ticketId = '', onBack }) {
             </div>
           )}
 
-          {(complaint.resolutionProof || complaint.resolution_proof_url) && (
+          {getRealResolutionProof(complaint) && (
             <div>
               <span className="text-[11px] font-extrabold text-slate-700 block mb-2">
                 Mandatory Resolution Proof Photo / Document:
               </span>
               {(() => {
-                const proofObj = typeof complaint.resolutionProof === 'object' && complaint.resolutionProof !== null
-                  ? complaint.resolutionProof
-                  : {};
-                const fileData = proofObj.fileData || complaint.resolution_proof_url || proofObj.url || (typeof complaint.resolutionProof === 'string' ? complaint.resolutionProof : '');
-                const fileName = proofObj.fileName || 'Resolution_Proof_Photo';
-                const isPdf = proofObj.fileType?.includes('pdf') || fileName.toLowerCase().endsWith('.pdf');
+                const proofObj = getRealResolutionProof(complaint);
+                if (!proofObj) return null;
+                const isPdf = proofObj.fileType?.includes('pdf') || proofObj.fileName?.toLowerCase().endsWith('.pdf');
+                const isImage = !isPdf && proofObj.fileData;
 
                 return (
-                  <div className="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                    <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                      {isPdf ? (
-                        <FileText className="w-6 h-6 text-rose-600 flex-shrink-0" />
+                  <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                    <div className="flex items-center gap-3 min-w-0 pr-2">
+                      {isImage ? (
+                        <img
+                          src={proofObj.fileData}
+                          alt={proofObj.fileName}
+                          className="w-12 h-12 object-cover rounded-lg border border-slate-200 shadow-xs flex-shrink-0"
+                        />
                       ) : (
-                        <ImageIcon className="w-6 h-6 text-emerald-600 flex-shrink-0" />
+                        <div className="w-12 h-12 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-center flex-shrink-0 text-rose-600">
+                          <FileText className="w-6 h-6" />
+                        </div>
                       )}
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-slate-800 truncate m-0">
-                          {fileName}
+                          {proofObj.fileName}
                         </p>
                         <span className="text-[10px] text-slate-400 font-semibold uppercase">
                           {isPdf ? 'PDF Document' : 'Photo Proof'} • Department Verified
@@ -552,16 +587,16 @@ export default function TicketTracker({ ticketId = '', onBack }) {
                     <div className="flex items-center gap-2 flex-shrink-0">
                       <button
                         type="button"
-                        onClick={() => setPreviewAttachment({ fileName, fileData, isPdf })}
+                        onClick={() => setPreviewAttachment({ fileName: proofObj.fileName, fileData: proofObj.fileData, isPdf })}
                         className="px-3 py-1.5 bg-[#084325] hover:bg-[#06331c] text-white text-xs font-bold rounded-lg transition shadow-xs flex items-center gap-1 cursor-pointer"
                       >
                         <Eye className="w-3.5 h-3.5" />
                         <span>View Proof</span>
                       </button>
-                      {fileData && (
+                      {proofObj.fileData && (
                         <a
-                          href={fileData}
-                          download={fileName}
+                          href={proofObj.fileData}
+                          download={proofObj.fileName}
                           className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition cursor-pointer border border-slate-200"
                           title="Download Document"
                         >

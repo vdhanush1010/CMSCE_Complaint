@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   X, 
   Send, 
@@ -25,6 +25,40 @@ import {
   Calendar
 } from 'lucide-react';
 import { apiClient } from '../../api/client';
+
+export const getRealResolutionProof = (comp) => {
+  if (!comp) return null;
+  const p = comp.resolutionProof;
+  const u = comp.resolution_proof_url;
+  if (p && typeof p === 'object') {
+    const fileData = p.fileData || p.url || '';
+    if (fileData && typeof fileData === 'string' && fileData.trim().length > 0) {
+      return {
+        fileName: p.fileName || 'Resolution Proof Photo',
+        fileData: fileData.trim(),
+        fileType: p.fileType || (fileData.startsWith('data:application/pdf') || p.fileName?.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
+        fileSize: p.fileSize || 0
+      };
+    }
+  }
+  if (p && typeof p === 'string' && p.trim().length > 0) {
+    return {
+      fileName: 'Resolution Proof Photo',
+      fileData: p.trim(),
+      fileType: p.startsWith('data:application/pdf') || p.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+      fileSize: 0
+    };
+  }
+  if (u && typeof u === 'string' && u.trim().length > 0) {
+    return {
+      fileName: 'Resolution Proof Photo',
+      fileData: u.trim(),
+      fileType: u.startsWith('data:application/pdf') || u.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg',
+      fileSize: 0
+    };
+  }
+  return null;
+};
 
 const STAGES_6 = [
   { key: 'SUBMITTED',            label: '1. Submitted' },
@@ -83,6 +117,7 @@ export default function DepartmentControlPanel({
   const [closeRemarks, setCloseRemarks] = useState('');
   const [reopenReason, setReopenReason] = useState('');
   const [extensionHours, setExtensionHours] = useState(24);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     if (complaint) {
@@ -98,6 +133,7 @@ export default function DepartmentControlPanel({
       setCloseRemarks('');
       setReopenReason('');
       setExtensionHours(24);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   }, [complaint?.id]);
 
@@ -118,7 +154,8 @@ export default function DepartmentControlPanel({
         fileName: file.name,
         fileData: reader.result,
         fileType: file.type || (file.name.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'image/jpeg'),
-        fileSize: file.size
+        fileSize: file.size,
+        isPendingUpload: true
       });
       setApiError('');
     };
@@ -169,16 +206,25 @@ export default function DepartmentControlPanel({
     setApiError('');
     setApiSuccess('');
 
-    // Only prompt for resolution proof upload when transitioning to RESOLVED
-    const needsProofUpload = targetStage === 'RESOLVED';
-    const alreadyHasProof = complaint.resolutionProof || complaint.resolution_proof_url;
+    // Mandatory Resolution Proof validation when transitioning to RESOLVED
+    if (targetStage === 'RESOLVED') {
+      const existingProof = getRealResolutionProof(complaint);
+      const effectiveProof = resolutionFile || existingProof;
 
-    if (needsProofUpload && !alreadyHasProof && !resolutionFile) {
-      setPendingStatus(targetStage);
+      if (!effectiveProof) {
+        setApiError('Resolution proof photo is required to mark as Resolved.');
+        setPendingStatus('RESOLVED');
+        setTimeout(() => {
+          fileInputRef.current?.click();
+        }, 120);
+        return;
+      }
+
+      await executeTransition(targetStage, effectiveProof, resolutionNotes);
       return;
     }
 
-    await executeTransition(targetStage, resolutionFile, resolutionNotes);
+    await executeTransition(targetStage, null, '');
   };
 
   // Re-investigate workflow for appealed complaints
@@ -248,12 +294,17 @@ export default function DepartmentControlPanel({
   };
 
   const handleProofSubmit = (e) => {
-    e.preventDefault();
-    if (!resolutionFile && !complaint.resolutionProof && !complaint.resolution_proof_url) {
-      setApiError('Resolution proof photo or document is required.');
+    if (e) e.preventDefault();
+    setApiError('');
+    setApiSuccess('');
+    const existingProof = getRealResolutionProof(complaint);
+    const effectiveProof = resolutionFile || existingProof;
+    if (!effectiveProof) {
+      setApiError('Resolution proof photo is required to mark as Resolved.');
+      fileInputRef.current?.click();
       return;
     }
-    executeTransition(pendingStatus || 'RESOLVED', resolutionFile, resolutionNotes);
+    executeTransition(pendingStatus || 'RESOLVED', effectiveProof, resolutionNotes);
   };
 
   // Admin Governance Actions
@@ -636,65 +687,114 @@ export default function DepartmentControlPanel({
                   </div>
                 ) : null}
 
-                {/* Proof Upload Form (when resolving) */}
-                {pendingStatus ? (
-                  <form onSubmit={handleProofSubmit} className="space-y-4 p-4 bg-amber-50/90 border border-amber-300 rounded-xl shadow-xs">
+                {/* Proof Upload & Verification Box (active on Stage 5 or when pending resolution) */}
+                {(pendingStatus === 'RESOLVED' || currentStageKey === 'PENDING_VERIFICATION') && !isResolved && !isAppealed ? (
+                  <form onSubmit={handleProofSubmit} className={`space-y-4 p-4 rounded-xl border transition shadow-xs ${apiError.includes('proof') ? 'bg-rose-50/80 border-rose-300 ring-2 ring-rose-200' : 'bg-emerald-50/50 border-emerald-300'}`}>
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-black text-amber-950 uppercase tracking-wide flex items-center gap-1.5 m-0">
+                      <p className="text-xs font-black text-slate-900 uppercase tracking-wide flex items-center gap-1.5 m-0">
                         <CheckCircle2 className="w-4 h-4 text-emerald-700" />
-                        Resolution Proof Required: Moving to "{pendingStatus}"
+                        Stage 6 Verification: Resolution Proof
                       </p>
+                      {resolutionFile && (
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          Photo Attached
+                        </span>
+                      )}
                     </div>
 
-                    {/* Mandatory Resolution Proof Photo */}
+                    {/* Resolution Proof Upload / Preview Box */}
                     <div>
-                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1">
-                        Upload Resolution Proof Photo / Document <span className="text-rose-500">* (Mandatory)</span>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wide mb-1.5">
+                        Technician Resolution Proof Photo / Document <span className="text-rose-500">* (Mandatory)</span>
                       </label>
 
-                      {!resolutionFile ? (
-                        <label className="flex flex-col items-center justify-center p-5 border-2 border-dashed border-amber-300 hover:border-emerald-600 rounded-xl bg-white hover:bg-emerald-50/40 transition cursor-pointer group">
-                          <UploadCloud className="w-8 h-8 text-amber-600 group-hover:text-emerald-700 transition mb-1" />
+                      {!resolutionFile && !getRealResolutionProof(complaint) ? (
+                        <div
+                          onClick={() => fileInputRef.current?.click()}
+                          className={`flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-xl bg-white transition cursor-pointer group ${apiError.includes('proof') ? 'border-rose-400 hover:border-rose-600 bg-rose-50/30' : 'border-emerald-300 hover:border-emerald-600 hover:bg-emerald-50/40'}`}
+                        >
+                          <UploadCloud className="w-8 h-8 text-emerald-600 group-hover:scale-110 transition mb-1.5" />
                           <span className="text-xs font-bold text-slate-800">
-                            Click to select resolution proof photo
+                            Click or drag & drop technician resolution proof photo
                           </span>
                           <span className="text-[10px] text-slate-400 mt-0.5">
-                            JPG, PNG, PDF (Up to 12MB)
+                            Mandatory JPG, PNG, or PDF (Up to 12MB)
                           </span>
                           <input
+                            ref={fileInputRef}
                             type="file"
-                            accept=".jpg,.jpeg,.png,.pdf"
+                            accept="image/jpeg,image/png,image/webp,application/pdf"
                             onChange={handleFileSelect}
-                            required
                             className="hidden"
                           />
-                        </label>
-                      ) : (
-                        <div className="flex items-center justify-between p-3 bg-white border border-emerald-300 rounded-xl shadow-xs">
-                          <div className="flex items-center gap-2.5 min-w-0 pr-2">
-                            {resolutionFile.fileType?.includes('pdf') || resolutionFile.fileName?.toLowerCase().endsWith('.pdf') ? (
-                              <FileText className="w-6 h-6 text-rose-600 flex-shrink-0" />
-                            ) : (
-                              <ImageIcon className="w-6 h-6 text-emerald-600 flex-shrink-0" />
-                            )}
-                            <div className="min-w-0">
-                              <p className="text-xs font-bold text-slate-800 truncate m-0">
-                                {resolutionFile.fileName}
-                              </p>
-                              <span className="text-[10px] text-slate-400 font-semibold">
-                                {(resolutionFile.fileSize / 1024).toFixed(1)} KB • Attached
-                              </span>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setResolutionFile(null)}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded-md transition cursor-pointer"
-                            title="Remove"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
                         </div>
+                      ) : (
+                        (() => {
+                          const displayProof = resolutionFile || getRealResolutionProof(complaint);
+                          const isPdf = displayProof.fileType?.includes('pdf') || displayProof.fileName?.toLowerCase().endsWith('.pdf');
+                          const isImage = !isPdf && displayProof.fileData;
+
+                          return (
+                            <div className="flex items-center justify-between p-3.5 bg-white border border-emerald-300 rounded-xl shadow-xs">
+                              <div className="flex items-center gap-3 min-w-0 pr-2">
+                                {isImage ? (
+                                  <img
+                                    src={displayProof.fileData}
+                                    alt={displayProof.fileName}
+                                    className="w-12 h-12 object-cover rounded-lg border border-emerald-200 shadow-xs flex-shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-12 h-12 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-center flex-shrink-0 text-rose-600">
+                                    <FileText className="w-6 h-6" />
+                                  </div>
+                                )}
+                                <div className="min-w-0">
+                                  <p className="text-xs font-bold text-slate-800 truncate m-0">
+                                    {displayProof.fileName}
+                                  </p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-[10px] text-slate-400 font-semibold uppercase">
+                                      {isPdf ? 'PDF Document' : 'Photo Proof'}
+                                    </span>
+                                    {displayProof.fileSize > 0 && (
+                                      <span className="text-[10px] text-slate-400">
+                                        • {(displayProof.fileSize / 1024).toFixed(1)} KB
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewAttachment({
+                                    fileName: displayProof.fileName,
+                                    fileData: displayProof.fileData,
+                                    isPdf
+                                  })}
+                                  className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>View Proof</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setResolutionFile(null);
+                                    if (fileInputRef.current) fileInputRef.current.value = '';
+                                    setApiError('');
+                                  }}
+                                  className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                                  title="Remove selected proof"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                  <span>Remove</span>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()
                       )}
                     </div>
 
@@ -707,31 +807,33 @@ export default function DepartmentControlPanel({
                         value={resolutionNotes}
                         onChange={(e) => setResolutionNotes(e.target.value)}
                         placeholder="Optional comments regarding corrective actions taken, technician details, or inspection notes..."
-                        rows="3"
-                        className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600 text-slate-800 font-medium"
+                        rows="2"
+                        className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600 text-slate-800 font-medium"
                       />
                     </div>
 
                     <div className="flex gap-2 pt-1">
                       <button
                         type="submit"
-                        disabled={isTransitioning || !resolutionFile}
-                        className="flex-1 py-2.5 px-4 bg-[#084325] hover:bg-[#06331c] disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                        disabled={isTransitioning}
+                        className="flex-1 py-3 px-4 bg-[#084325] hover:bg-[#06331c] disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         {isTransitioning ? (
-                          <><Loader2 className="h-4 w-4 animate-spin" /> Saving Resolution...</>
+                          <><Loader2 className="h-4 w-4 animate-spin" /> Verifying & Resolving...</>
                         ) : (
-                          <><CheckCircle2 className="h-4 w-4 text-amber-300" /> Confirm & Transition to {pendingStatus}</>
+                          <><CheckCircle2 className="h-4 w-4 text-amber-300" /> Verify & Mark as Resolved</>
                         )}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => setPendingStatus(null)}
-                        disabled={isTransitioning}
-                        className="py-2.5 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
-                      >
-                        Cancel
-                      </button>
+                      {pendingStatus && (
+                        <button
+                          type="button"
+                          onClick={() => { setPendingStatus(null); setApiError(''); }}
+                          disabled={isTransitioning}
+                          className="py-2.5 px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-xl transition cursor-pointer"
+                        >
+                          Cancel
+                        </button>
+                      )}
                     </div>
                   </form>
                 ) : !isAppealed ? (
@@ -903,8 +1005,8 @@ export default function DepartmentControlPanel({
               </div>
             )}
 
-            {/* Section 5: Verified Resolution Report & Proof (if resolved) */}
-            {(complaint.resolutionProof || complaint.resolutionNotes || complaint.resolution_notes || complaint.resolution_proof_url) && (
+            {/* Section 5: Verified Resolution Report & Proof (only if resolved and genuine evidence exists) */}
+            {isResolved && (getRealResolutionProof(complaint) || complaint.resolutionNotes || complaint.resolution_notes) && (
               <div className="bg-emerald-50/60 border border-emerald-200 rounded-2xl p-5 space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-emerald-200">
                   <h4 className="text-xs font-extrabold text-emerald-950 uppercase tracking-wide flex items-center gap-1.5 m-0">
@@ -925,56 +1027,58 @@ export default function DepartmentControlPanel({
                   </div>
                 )}
 
-                {(complaint.resolutionProof || complaint.resolution_proof_url) && (
-                  <div>
-                    <span className="text-[11px] font-extrabold text-slate-700 block mb-1.5">Attached Photo Proof:</span>
-                    {(() => {
-                      const proofObj = typeof complaint.resolutionProof === 'object' && complaint.resolutionProof !== null
-                        ? complaint.resolutionProof
-                        : {};
-                      const fileData = proofObj.fileData || complaint.resolution_proof_url || proofObj.url || (typeof complaint.resolutionProof === 'string' ? complaint.resolutionProof : '');
-                      const fileName = proofObj.fileName || 'Resolution_Proof_Photo';
-                      const isPdf = proofObj.fileType?.includes('pdf') || fileName.toLowerCase().endsWith('.pdf');
+                {(() => {
+                  const proofObj = getRealResolutionProof(complaint);
+                  if (!proofObj) return null;
+                  const isPdf = proofObj.fileType?.includes('pdf') || proofObj.fileName?.toLowerCase().endsWith('.pdf');
+                  const isImage = !isPdf && proofObj.fileData;
 
-                      return (
-                        <div className="flex items-center justify-between p-3 bg-white border border-emerald-200 rounded-xl">
-                          <div className="flex items-center gap-2 min-w-0 pr-2">
-                            {isPdf ? (
-                              <FileText className="w-5 h-5 text-rose-600 flex-shrink-0" />
-                            ) : (
-                              <ImageIcon className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-                            )}
-                            <div className="min-w-0">
-                              <p className="text-xs font-bold text-slate-800 truncate m-0">{fileName}</p>
-                              <span className="text-[10px] text-slate-400 font-semibold uppercase">{isPdf ? 'PDF' : 'Photo'}</span>
+                  return (
+                    <div>
+                      <span className="text-[11px] font-extrabold text-slate-700 block mb-1.5">Attached Photo Proof:</span>
+                      <div className="flex items-center justify-between p-3 bg-white border border-emerald-200 rounded-xl">
+                        <div className="flex items-center gap-3 min-w-0 pr-2">
+                          {isImage ? (
+                            <img
+                              src={proofObj.fileData}
+                              alt={proofObj.fileName}
+                              className="w-12 h-12 object-cover rounded-lg border border-emerald-200 shadow-xs flex-shrink-0"
+                            />
+                          ) : (
+                            <div className="w-12 h-12 rounded-lg bg-rose-50 border border-rose-200 flex items-center justify-center flex-shrink-0 text-rose-600">
+                              <FileText className="w-6 h-6" />
                             </div>
-                          </div>
-
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => setPreviewAttachment({ fileName, fileData, isPdf })}
-                              className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
-                            >
-                              <Eye className="w-3.5 h-3.5" />
-                              <span>View Proof</span>
-                            </button>
-                            {fileData && (
-                              <a
-                                href={fileData}
-                                download={fileName}
-                                className="p-1 text-slate-400 hover:text-slate-700 rounded transition"
-                                title="Download"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                              </a>
-                            )}
+                          )}
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-800 truncate m-0">{proofObj.fileName}</p>
+                            <span className="text-[10px] text-slate-400 font-semibold uppercase">{isPdf ? 'PDF Document' : 'Photo Proof'} • Verified</span>
                           </div>
                         </div>
-                      );
-                    })()}
-                  </div>
-                )}
+
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewAttachment({ fileName: proofObj.fileName, fileData: proofObj.fileData, isPdf })}
+                            className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>View Proof</span>
+                          </button>
+                          {proofObj.fileData && (
+                            <a
+                              href={proofObj.fileData}
+                              download={proofObj.fileName}
+                              className="p-1.5 text-slate-400 hover:text-slate-700 rounded transition"
+                              title="Download"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

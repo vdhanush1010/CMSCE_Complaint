@@ -553,17 +553,16 @@ export async function updateStatus(req, res) {
       if (targetStage === 'RESOLVED' || ['Resolved', 'RESOLVED'].includes(targetStatus)) {
         const hasIncomingProof = resolutionProof && (
           (typeof resolutionProof === 'string' && resolutionProof.trim().length > 0) ||
-          (resolutionProof.fileData && resolutionProof.fileData.trim().length > 0) ||
-          (resolutionProof.url && resolutionProof.url.trim().length > 0) ||
-          (resolutionProof.fileName && resolutionProof.fileName.trim().length > 0)
+          (typeof resolutionProof === 'object' && resolutionProof.fileData && typeof resolutionProof.fileData === 'string' && resolutionProof.fileData.trim().length > 0) ||
+          (typeof resolutionProof === 'object' && resolutionProof.url && typeof resolutionProof.url === 'string' && resolutionProof.url.trim().length > 0)
         );
         const hasExistingProof = complaint.resolutionProof && (
           (typeof complaint.resolutionProof === 'string' && complaint.resolutionProof.trim().length > 0) ||
-          (complaint.resolutionProof.fileData && complaint.resolutionProof.fileData.trim().length > 0) ||
-          (complaint.resolutionProof.url && complaint.resolutionProof.url.trim().length > 0)
+          (typeof complaint.resolutionProof === 'object' && complaint.resolutionProof.fileData && typeof complaint.resolutionProof.fileData === 'string' && complaint.resolutionProof.fileData.trim().length > 0) ||
+          (typeof complaint.resolutionProof === 'object' && complaint.resolutionProof.url && typeof complaint.resolutionProof.url === 'string' && complaint.resolutionProof.url.trim().length > 0)
         );
-        const hasProofUrl = (resolution_proof_url && resolution_proof_url.trim().length > 0) ||
-          (complaint.resolution_proof_url && complaint.resolution_proof_url.trim().length > 0);
+        const hasProofUrl = (resolution_proof_url && typeof resolution_proof_url === 'string' && resolution_proof_url.trim().length > 0) ||
+          (complaint.resolution_proof_url && typeof complaint.resolution_proof_url === 'string' && complaint.resolution_proof_url.trim().length > 0);
 
         if (!hasIncomingProof && !hasExistingProof && !hasProofUrl) {
           return res.status(400).json({
@@ -583,24 +582,26 @@ export async function updateStatus(req, res) {
         complaint.resolutionProof = resolutionProof;
         const proofUrl = typeof resolutionProof === 'string'
           ? resolutionProof
-          : (resolutionProof.fileData || resolutionProof.url || resolutionProof.fileName || '');
+          : (resolutionProof.fileData || resolutionProof.url || '');
         complaint.resolution_proof_url = proofUrl;
 
-        complaint.proofs = complaint.proofs || [];
-        complaint.proofs.push({
-          fileName: resolutionProof.fileName || 'Resolution_Proof',
-          url: proofUrl,
-          uploadedAt: new Date()
-        });
+        if (proofUrl) {
+          complaint.proofs = complaint.proofs || [];
+          complaint.proofs.push({
+            fileName: resolutionProof.fileName || 'Resolution_Proof_Photo.jpg',
+            url: proofUrl,
+            uploadedAt: new Date()
+          });
 
-        complaint.attachments = complaint.attachments || [];
-        complaint.attachments.push({
-          fileName: resolutionProof.fileName || 'Resolution_Proof',
-          fileData: proofUrl,
-          fileType: resolutionProof.fileType || 'image/jpeg',
-          fileSize: resolutionProof.fileSize || 0,
-          uploadedAt: new Date()
-        });
+          complaint.attachments = complaint.attachments || [];
+          complaint.attachments.push({
+            fileName: resolutionProof.fileName || 'Resolution_Proof_Photo.jpg',
+            fileData: proofUrl,
+            fileType: resolutionProof.fileType || 'image/jpeg',
+            fileSize: resolutionProof.fileSize || 0,
+            uploadedAt: new Date()
+          });
+        }
       } else if (resolution_proof_url) {
         complaint.resolution_proof_url = resolution_proof_url;
       }
