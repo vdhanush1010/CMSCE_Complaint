@@ -475,7 +475,7 @@ export async function updateStatus(req, res) {
     } = req.body;
 
     if (!id) {
-      return res.status(400).json({ error: 'Complaint identifier is required.' });
+      return res.status(400).json({ success: false, message: 'Complaint identifier is required.' });
     }
 
     let complaint = null;
@@ -487,7 +487,7 @@ export async function updateStatus(req, res) {
     }
 
     if (!complaint) {
-      return res.status(404).json({ error: `Complaint ticket "${id}" not found.` });
+      return res.status(404).json({ success: false, message: `Complaint ticket "${id}" not found.` });
     }
 
     // Role check for department staff: must belong to the same department
@@ -495,31 +495,33 @@ export async function updateStatus(req, res) {
       const userDept = (req.user.department || req.user.departmentCode || '').toUpperCase();
       const compDept = (complaint.department || complaint.departmentCode || complaint.assigned_department_code || '').toUpperCase();
       if (userDept && compDept && userDept !== compDept) {
-        return res.status(403).json({ error: 'Forbidden: Cannot modify complaints assigned to another department.' });
+        return res.status(403).json({ success: false, message: 'Forbidden: Cannot modify complaints assigned to another department.' });
       }
     }
 
-    const changerName = req.user?.name || req.user?.full_name || 'Department Staff';
+    const changerName = req.user?.name || req.user?.email || 'Department Staff';
     const changerRole = req.user?.role || 'STAFF';
     const isAdmin = req.user && req.user.role === 'ADMIN';
 
-    // Normalize target stage & status
+    // Normalize target stage & status interchangeably
+    const rawInput = (stage || status || '').trim();
     let targetStage = stage ? stage.toUpperCase().trim() : null;
     let targetStatus = status ? status.trim() : null;
 
-    if (!targetStage && targetStatus) {
-      targetStage = STATUS_TO_CANONICAL_STAGE[targetStatus] || null;
+    if (!targetStage && rawInput) {
+      targetStage = STATUS_TO_CANONICAL_STAGE[rawInput] || rawInput.toUpperCase().replace(/\s+/g, '_');
     }
     if (targetStage && !targetStatus) {
       targetStatus = STAGE_DISPLAY_STATUS[targetStage] || targetStage;
     }
-    if (targetStage === 'RESOLVED' && targetStatus && targetStatus.toUpperCase() === 'RESOLVED') {
+    if (targetStage === 'RESOLVED' || (targetStatus && targetStatus.toUpperCase() === 'RESOLVED')) {
+      targetStage = 'RESOLVED';
       targetStatus = 'Resolved';
     }
 
     const currentStage = complaint.stage || STATUS_TO_CANONICAL_STAGE[complaint.status] || 'SUBMITTED';
     const isAppealed = complaint.status === 'APPEALED' || complaint.status === 'Appealed';
-    const oldStatus = complaint.status;
+    const oldStatus = complaint.status || 'Submitted';
 
     // Linear progression and appeal re-investigation rules
     if (targetStage && (targetStage !== currentStage || isAppealed)) {
@@ -532,14 +534,16 @@ export async function updateStatus(req, res) {
           const allowedReinvestigate = ['ASSIGNED', 'IN_PROGRESS'];
           if (!allowedReinvestigate.includes(targetStage)) {
             return res.status(400).json({
-              error: `For appealed grievances, you must click "Start Re-investigation" to transition to Assigned or In Progress before subsequent stages.`
+              success: false,
+              message: `For appealed grievances, you must click "Start Re-investigation" to transition to Assigned or In Progress before subsequent stages.`
             });
           }
         } else {
           // Strictly sequential progression: cannot skip intermediate stages
           if (targetStageIndex === -1 || targetStageIndex !== currentStageIndex + 1) {
             return res.status(400).json({
-              error: `Invalid stage transition. You cannot skip stages. Expected next stage: "${STAGE_ORDER[currentStageIndex + 1] || 'None'}" (current: "${currentStage}").`
+              success: false,
+              message: `Invalid stage transition. You cannot skip stages. Expected next stage: "${STAGE_ORDER[currentStageIndex + 1] || 'None'}" (current: "${currentStage}").`
             });
           }
         }
@@ -548,27 +552,29 @@ export async function updateStatus(req, res) {
       // Mandatory Resolution Proof check when resolving
       if (targetStage === 'RESOLVED' || ['Resolved', 'RESOLVED'].includes(targetStatus)) {
         const hasIncomingProof = resolutionProof && (
-          (typeof resolutionProof === 'string' && resolutionProof.trim()) ||
-          (resolutionProof.fileData && resolutionProof.fileData.trim()) ||
-          (resolutionProof.url && resolutionProof.url.trim()) ||
-          (resolutionProof.fileName && resolutionProof.fileName.trim())
+          (typeof resolutionProof === 'string' && resolutionProof.trim().length > 0) ||
+          (resolutionProof.fileData && resolutionProof.fileData.trim().length > 0) ||
+          (resolutionProof.url && resolutionProof.url.trim().length > 0) ||
+          (resolutionProof.fileName && resolutionProof.fileName.trim().length > 0)
         );
         const hasExistingProof = complaint.resolutionProof && (
-          (typeof complaint.resolutionProof === 'string' && complaint.resolutionProof.trim()) ||
-          (complaint.resolutionProof.fileData && complaint.resolutionProof.fileData.trim()) ||
-          (complaint.resolutionProof.url && complaint.resolutionProof.url.trim())
+          (typeof complaint.resolutionProof === 'string' && complaint.resolutionProof.trim().length > 0) ||
+          (complaint.resolutionProof.fileData && complaint.resolutionProof.fileData.trim().length > 0) ||
+          (complaint.resolutionProof.url && complaint.resolutionProof.url.trim().length > 0)
         );
-        const hasProofUrl = (resolution_proof_url && resolution_proof_url.trim()) ||
-          (complaint.resolution_proof_url && complaint.resolution_proof_url.trim());
+        const hasProofUrl = (resolution_proof_url && resolution_proof_url.trim().length > 0) ||
+          (complaint.resolution_proof_url && complaint.resolution_proof_url.trim().length > 0);
 
         if (!hasIncomingProof && !hasExistingProof && !hasProofUrl) {
           return res.status(400).json({
-            error: 'Mandatory resolution proof photo or document is required when resolving a complaint.'
+            success: false,
+            message: 'Resolution proof photo is mandatory'
           });
         }
       }
 
       // Synchronously apply stage and status
+      const nextStage = targetStage;
       complaint.stage = targetStage;
       complaint.status = targetStatus || STAGE_DISPLAY_STATUS[targetStage] || targetStage;
 
@@ -580,14 +586,14 @@ export async function updateStatus(req, res) {
           : (resolutionProof.fileData || resolutionProof.url || resolutionProof.fileName || '');
         complaint.resolution_proof_url = proofUrl;
 
-        if (!complaint.proofs) complaint.proofs = [];
+        complaint.proofs = complaint.proofs || [];
         complaint.proofs.push({
           fileName: resolutionProof.fileName || 'Resolution_Proof',
           url: proofUrl,
           uploadedAt: new Date()
         });
 
-        if (!complaint.attachments) complaint.attachments = [];
+        complaint.attachments = complaint.attachments || [];
         complaint.attachments.push({
           fileName: resolutionProof.fileName || 'Resolution_Proof',
           fileData: proofUrl,
@@ -606,22 +612,22 @@ export async function updateStatus(req, res) {
         complaint.resolution_notes = notes;
       }
 
-      const noteText = remarks || notes || (isAppealed ? `Re-investigation initiated: Stage moved to ${targetStage}` : `Stage moved to ${targetStage}`);
+      const noteText = remarks || notes || (isAppealed ? `Re-investigation initiated: Stage moved to ${nextStage}` : `Stage transitioned to ${nextStage}`);
 
-      // Push timeline entry with action: 'STAGE_UPDATED'
-      if (!complaint.timeline) complaint.timeline = [];
+      // Push timeline entry safely
+      complaint.timeline = complaint.timeline || [];
       complaint.timeline.push({
         action: 'STAGE_UPDATED',
-        message: `Complaint moved to ${targetStage}`,
+        message: `Stage transitioned to ${nextStage}`,
         status: complaint.status,
+        timestamp: new Date(),
         changedBy: changerName,
         role: changerRole,
-        remarks: noteText,
-        timestamp: new Date()
+        remarks: noteText
       });
 
-      // Push history entry
-      if (!complaint.history) complaint.history = [];
+      // Push history entry safely
+      complaint.history = complaint.history || [];
       complaint.history.push({
         old_status: oldStatus,
         new_status: complaint.status,
@@ -648,6 +654,7 @@ export async function updateStatus(req, res) {
     // Optional Priority update
     if (priority && priority !== complaint.priority) {
       complaint.priority = priority;
+      complaint.history = complaint.history || [];
       complaint.history.push({
         old_status: complaint.status,
         new_status: complaint.status,
@@ -666,12 +673,13 @@ export async function updateStatus(req, res) {
       if (deptDoc) {
         complaint.assigned_department_name = deptDoc.name;
       }
-      complaint.ai_routing_reasoning = `Manually re-routed from ${oldDept} to ${complaint.assigned_department_name} by ${changerName}.`;
+      complaint.ai_routing_reasoning = `Manually re-routed from ${oldDept} to ${complaint.assigned_department_name || complaint.department} by ${changerName}.`;
+      complaint.history = complaint.history || [];
       complaint.history.push({
         old_status: complaint.status,
         new_status: complaint.status,
         changed_by_name: changerName,
-        remarks: `Re-routed to ${complaint.assigned_department_name}`,
+        remarks: `Re-routed to ${complaint.assigned_department_name || complaint.department}`,
         timestamp: new Date()
       });
     }
@@ -694,7 +702,7 @@ export async function updateStatus(req, res) {
     });
   } catch (err) {
     console.error('[Update Complaint Status Error]:', err);
-    return res.status(500).json({ error: 'Failed to update complaint status', detail: err.message });
+    return res.status(500).json({ success: false, message: 'Failed to update complaint status', error: err.message, detail: err.message });
   }
 }
 

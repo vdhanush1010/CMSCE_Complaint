@@ -195,7 +195,15 @@ export default function DepartmentControlPanel({
 
     try {
       const targetId = complaint.db_id || complaint._id || complaint.id;
-      const targetStatus = targetStage === 'RESOLVED' ? 'Resolved' : targetStage === 'IN_PROGRESS' ? 'In Progress' : targetStage;
+      const stageDisplayMap = {
+        SUBMITTED: 'Submitted',
+        AI_ANALYSED: 'AI Analysed',
+        ASSIGNED: 'Assigned',
+        IN_PROGRESS: 'In Progress',
+        PENDING_VERIFICATION: 'Resolution Pending Verification',
+        RESOLVED: 'Resolved'
+      };
+      const targetStatus = stageDisplayMap[targetStage] || targetStage;
       const body = {
         stage: targetStage,
         status: targetStatus,

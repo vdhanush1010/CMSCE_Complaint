@@ -33,7 +33,7 @@ const complaintSchema = new mongoose.Schema(
     departmentCode: {
       type: String,
       uppercase: true,
-      enum: ['CANTEEN', 'TRANSPORT', 'HOSTEL', 'SPORTS', 'ACADEMIC', 'HOSPITALITY'],
+      trim: true,
       default: function () {
         return this.department;
       }
@@ -41,38 +41,43 @@ const complaintSchema = new mongoose.Schema(
     assigned_department_code: {
       type: String,
       uppercase: true,
+      trim: true,
       default: function () {
         return this.departmentCode || this.department;
       }
     },
     assigned_department_name: {
       type: String,
-      default: 'Canteen Operations'
+      default: 'Department Operations'
     },
     priority: {
       type: String,
-      enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'],
+      uppercase: true,
+      enum: ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'Critical', 'High', 'Medium', 'Low', 'critical', 'high', 'medium', 'low'],
       default: 'MEDIUM'
     },
     status: {
       type: String,
       enum: [
         'Submitted',
+        'SUBMITTED',
         'AI Analysed',
+        'AI_ANALYSED',
         'Assigned',
+        'ASSIGNED',
         'In Progress',
+        'IN_PROGRESS',
         'Resolution Pending Verification',
+        'PENDING_VERIFICATION',
+        'Pending Verification',
         'Resolved',
+        'RESOLVED',
         'Closed',
+        'CLOSED',
         'Reopened',
         'REOPENED',
-        'SUBMITTED',
-        'IN_PROGRESS',
-        'PENDING_VERIFICATION',
-        'RESOLVED',
-        'APPEALED',
         'Appealed',
-        'CLOSED'
+        'APPEALED'
       ],
       default: 'Submitted'
     },
