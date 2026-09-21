@@ -118,6 +118,12 @@ router.post('/', optionalAuth, async (req, res) => {
         finalSlaHours = fallback.sla_hours;
       }
     } else {
+      const deptDoc = await Department.findOne({ code: finalDept.toUpperCase() });
+      if (deptDoc) {
+        finalDeptName = deptDoc.name;
+      }
+    }
+
     // Calculate priority SLA: Strictly 12 hours for CRITICAL and 48 hours for HIGH / MEDIUM / LOW
     finalPriority = (finalPriority || 'MEDIUM').toUpperCase();
     finalSlaHours = getSlaHours(finalPriority);
