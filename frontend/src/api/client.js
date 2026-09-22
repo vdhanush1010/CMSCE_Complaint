@@ -135,6 +135,16 @@ export const apiClient = {
       const res = await apiClient.get(`/api/complaints${query ? `?${query}` : ''}`);
       return Array.isArray(res) ? res : (res.complaints || []);
     },
+    getMyComplaints: async () => {
+      const token = localStorage.getItem('cmsce_student_token') || getAuthToken();
+      const res = await apiClient.get('/api/complaints/my', { token });
+      return Array.isArray(res) ? res : (res.complaints || []);
+    },
+    getDepartmentComplaints: async () => {
+      const token = localStorage.getItem('dept_token') || getAuthToken();
+      const res = await apiClient.get('/api/complaints/department/complaints', { token });
+      return Array.isArray(res) ? res : (res.complaints || []);
+    },
     track: (ticketId) => apiClient.get(`/api/complaints/track/${ticketId}`),
     create: (data) => apiClient.post('/api/complaints', data),
     updateStatus: (id, payload, options = {}) => {

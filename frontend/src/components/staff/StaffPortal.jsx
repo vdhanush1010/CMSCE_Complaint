@@ -101,9 +101,12 @@ const isMatchingComplaint = (a, b) => {
     const now = new Date();
     const deadline = (item.slaExtendedUntil || item.slaDeadline || item.sla_deadline_at) ? new Date(item.slaExtendedUntil || item.slaDeadline || item.sla_deadline_at) : now;
     const diffHours = Math.round((deadline - now) / (1000 * 3600));
+    const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(item.status) || item.stage === 'RESOLVED';
+    const isOverdue = !isResolved && (Boolean(item.is_sla_breached || item.isSlaBreached) || diffHours < 0 || now > deadline);
 
     return {
       id: item.ticket_id || item.id,
+      ticket_id: item.ticket_id || item.id,
       db_id: item.id || item._id,
       category: item.category || item.title || 'General',
       description: item.description || '',
@@ -111,10 +114,18 @@ const isMatchingComplaint = (a, b) => {
       priority: (item.priority || 'MEDIUM').toUpperCase(),
       status: item.status || 'Submitted',
       stage: resolveCanonicalStage(item.stage, item.status),
+      slaDeadline: item.slaDeadline || item.sla_deadline_at || item.slaExtendedUntil,
+      sla_deadline_at: item.sla_deadline_at || item.slaDeadline,
+      slaExtendedUntil: item.slaExtendedUntil,
       slaHoursLeft: diffHours,
-      isSlaOverdue: Boolean(item.is_sla_breached) || diffHours < 0,
-      studentName: item.is_anonymous ? 'Anonymous' : (item.student_name || 'Student User'),
-      studentRoll: item.student_roll || '2026-STU',
+      isSlaOverdue: isOverdue,
+      is_sla_breached: isOverdue,
+      isSlaBreached: isOverdue,
+      isAnonymous: Boolean(item.isAnonymous || item.is_anonymous),
+      is_anonymous: Boolean(item.isAnonymous || item.is_anonymous),
+      studentName: item.studentName || item.student_name || 'Student User',
+      studentRoll: item.studentRoll || item.rollNo || item.student_roll || '2026-STU',
+      studentEmail: item.studentEmail || item.student_email || 'Hidden',
       routingReasoning: item.ai_routing_reasoning || 'AI routing engine processed ticket.',
       attachments: item.attachments || item.proofs || [],
       resolutionProof: item.resolutionProof || null,

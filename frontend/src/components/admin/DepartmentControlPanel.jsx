@@ -25,6 +25,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { apiClient } from '../../api/client';
+import SlaTimer from '../common/SlaTimer';
 
 export const getRealResolutionProof = (comp) => {
   if (!comp) return null;
@@ -189,6 +190,15 @@ export default function DepartmentControlPanel({
   const currentStageKey = STAGES_6[currentStageIndex]?.key || 'SUBMITTED';
   const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(complaint.status) || complaint.stage === 'RESOLVED';
 
+  const now = new Date();
+  const effectiveDeadline = complaint.slaExtendedUntil || complaint.slaDeadline || complaint.sla_deadline_at;
+  const isSlaBreachedNow = !isResolved && Boolean(
+    complaint.is_sla_breached ||
+    complaint.isSlaBreached ||
+    complaint.isSlaOverdue ||
+    (effectiveDeadline && now > new Date(effectiveDeadline))
+  );
+
   // Initial student attachments (only non-empty, non-resolutionProof)
   const initialStudentAttachments = (Array.isArray(complaint.attachments) ? complaint.attachments : [])
     .filter(a => a && (a.fileData || a.url || a.fileName))
@@ -205,6 +215,11 @@ export default function DepartmentControlPanel({
   const handleLinearStep = async (targetStage) => {
     setApiError('');
     setApiSuccess('');
+
+    if (isStaffView && isSlaBreachedNow) {
+      setApiError('SLA time expired. Action locked pending Admin intervention.');
+      return;
+    }
 
     // Mandatory Resolution Proof validation when transitioning to RESOLVED
     if (targetStage === 'RESOLVED') {
@@ -466,17 +481,21 @@ export default function DepartmentControlPanel({
             {/* Section 1: Student Details & Issue Description */}
             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
-                <div className="flex items-center gap-2 text-xs text-slate-600">
+                <div className="flex items-center gap-2 text-xs text-slate-600 flex-wrap">
                   <User className="w-4 h-4 text-slate-400" />
                   <span>Student: <strong>{complaint.studentName}</strong> ({complaint.studentRoll || '2026-STU'})</span>
+                  {(complaint.isAnonymous || complaint.is_anonymous || complaint.studentName === 'Anonymous Student') && (
+                    <span className="px-2 py-0.5 bg-purple-100 text-purple-800 text-[10px] font-bold rounded-full border border-purple-200 shadow-2xs">
+                      Anonymous Submission
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <Calendar className="w-4 h-4 text-slate-400" />
                   <span>Assigned Unit: <strong>{complaint.assignedDept} Operations</strong></span>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-slate-500">
-                  <Clock className="w-4 h-4 text-slate-400" />
-                  <span>SLA Target: <strong>{complaint.priority?.toUpperCase() === 'CRITICAL' ? 'CRITICAL: 12 Hours' : 'HIGH / MEDIUM / LOW: 48 Hours'}</strong></span>
+                <div className="flex items-center gap-2 text-xs">
+                  <SlaTimer complaint={complaint} />
                 </div>
               </div>
 
@@ -661,6 +680,21 @@ export default function DepartmentControlPanel({
                   </span>
                 </div>
 
+                {/* SLA Breached Lock Alert Banner */}
+                {isSlaBreachedNow && !isResolved && (
+                  <div className="p-4 bg-rose-50 border-2 border-rose-400 rounded-xl space-y-1 shadow-xs animate-pulse">
+                    <div className="flex items-center gap-2 text-rose-900">
+                      <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0" />
+                      <h5 className="text-xs font-black uppercase tracking-wider m-0">
+                        SLA Breached — Locked. Awaiting Admin Reopen.
+                      </h5>
+                    </div>
+                    <p className="text-xs text-rose-800 m-0 leading-relaxed pl-7 font-medium">
+                      This ticket has exceeded its target resolution SLA. Department stage advancement has been locked by college policy pending College Administrator review and reopening.
+                    </p>
+                  </div>
+                )}
+
                 {/* Appeal Alert Banner & Re-investigate Button */}
                 {isAppealed ? (
                   <div className="p-4 bg-amber-50 border-2 border-amber-400 rounded-xl space-y-3">
@@ -826,8 +860,8 @@ export default function DepartmentControlPanel({
                     <div className="flex gap-2 pt-1">
                       <button
                         type="submit"
-                        disabled={isTransitioning}
-                        className="flex-1 py-3 px-4 bg-[#084325] hover:bg-[#06331c] disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                        disabled={isTransitioning || isSlaBreachedNow}
+                        className="flex-1 py-3 px-4 bg-[#084325] hover:bg-[#06331c] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         {isTransitioning ? (
                           <><Loader2 className="h-4 w-4 animate-spin" /> Verifying & Resolving...</>
@@ -857,8 +891,8 @@ export default function DepartmentControlPanel({
                         <button
                           type="button"
                           onClick={() => handleLinearStep(nextTransitionInfo.next)}
-                          disabled={isTransitioning}
-                          className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition shadow-sm flex items-center justify-between cursor-pointer disabled:opacity-50"
+                          disabled={isTransitioning || isSlaBreachedNow}
+                          className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl transition shadow-sm flex items-center justify-between cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <div className="flex items-center gap-2">
                             {isTransitioning ? (
@@ -866,7 +900,7 @@ export default function DepartmentControlPanel({
                             ) : (
                               <CheckCircle2 className="w-4 h-4 text-emerald-200" />
                             )}
-                            <span>{isTransitioning ? 'Advancing stage...' : nextTransitionInfo.label}</span>
+                            <span>{isTransitioning ? 'Advancing stage...' : isSlaBreachedNow ? 'Stage Progression Locked (SLA Breached)' : nextTransitionInfo.label}</span>
                           </div>
                           <ChevronRight className="w-4 h-4 text-emerald-200" />
                         </button>
@@ -1001,14 +1035,16 @@ export default function DepartmentControlPanel({
                       </button>
                     )}
 
-                    {['Resolved', 'Closed', 'RESOLVED', 'CLOSED', 'APPEALED'].includes(complaint.status) && (
+                    {(isSlaBreachedNow || ['Resolved', 'Closed', 'RESOLVED', 'CLOSED', 'APPEALED'].includes(complaint.status) || complaint.isSlaOverdue) && (
                       <button
                         type="button"
                         onClick={() => setAdminAction('REOPEN')}
-                        className="py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                        className={`py-2.5 px-4 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 cursor-pointer shadow-xs ${
+                          isSlaBreachedNow ? 'bg-rose-600 hover:bg-rose-700 ring-2 ring-rose-300 animate-pulse' : 'bg-amber-500 hover:bg-amber-600'
+                        }`}
                       >
                         <RotateCcw className="w-4 h-4" />
-                        <span>Reopen Grievance (+Extension)</span>
+                        <span>Reopen & Extend SLA</span>
                       </button>
                     )}
                   </div>

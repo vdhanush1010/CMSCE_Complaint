@@ -3,8 +3,8 @@ import { Complaint } from '../models/Complaint.js';
 import { Department } from '../models/Department.js';
 import { triageComplaint, getHeuristicTriage } from '../services/aiTriageService.js';
 import { getSlaHours, calculateSlaDeadline } from '../services/slaService.js';
-import { optionalAuth, protect } from '../middleware/auth.js';
-import { reopenComplaint, getComplaints, appealComplaint, closeComplaint, updateStatus } from '../controllers/complaintController.js';
+import { optionalAuth, protect, verifyAdmin } from '../middleware/auth.js';
+import { reopenComplaint, getComplaints, getMyComplaints, appealComplaint, closeComplaint, updateStatus } from '../controllers/complaintController.js';
 
 const router = express.Router();
 
@@ -57,6 +57,14 @@ router.post('/triage', optionalAuth, async (req, res) => {
 // @route   GET /api/complaints/
 // @desc    List all complaints (filtered by role, dept, search) with clean Admin isolation
 router.get('/', optionalAuth, getComplaints);
+
+// @route   GET /api/complaints/my
+// @desc    Logged-in student retrieves their own complaints with unmasked info & anonymous badge
+router.get('/my', protect, getMyComplaints);
+
+// @route   GET /api/complaints/department/complaints
+// @desc    Department staff retrieves complaints assigned to their department (masked)
+router.get('/department/complaints', protect, getComplaints);
 
 // @route   POST /api/complaints/
 // @desc    Submit a new complaint with automatic AI triage
@@ -133,8 +141,10 @@ router.post('/', optionalAuth, async (req, res) => {
     const now = new Date();
     const deadline = calculateSlaDeadline(finalSlaHours, now);
 
-    const studentName = is_anonymous ? 'Anonymous' : req.user ? req.user.name : 'Student User';
-    const studentRoll = req.user ? req.user.roll_number || '2026-STU' : '2026-STU';
+    const isAnonymous = Boolean(req.body.isAnonymous !== undefined ? req.body.isAnonymous : req.body.is_anonymous);
+    const studentName = req.user ? (req.user.name || req.user.full_name || 'Student User') : 'Student User';
+    const studentRoll = req.user ? (req.user.rollNo || req.user.roll_number || '2026-STU') : '2026-STU';
+    const studentEmail = req.user ? (req.user.email || '') : '';
 
     const safeAttachments = Array.isArray(attachments) ? attachments : [];
     const safeProofs = (Array.isArray(proofs) && proofs.length > 0)
@@ -156,17 +166,23 @@ router.post('/', optionalAuth, async (req, res) => {
       priority: finalPriority || 'MEDIUM',
       status: initialStatus,
       stage: initialStage,
-      is_anonymous: Boolean(is_anonymous),
+      is_anonymous: isAnonymous,
+      isAnonymous: isAnonymous,
       student: req.user ? req.user._id : undefined,
       studentId: req.user ? req.user._id : undefined,
       student_name: studentName,
+      studentName: studentName,
       student_roll: studentRoll,
+      rollNo: studentRoll,
+      student_email: studentEmail,
+      studentEmail: studentEmail,
       ai_confidence_score: finalConfidence || 95.0,
       ai_routing_reasoning: finalReasoning || 'AI triage processed and assigned ticket.',
       sla_hours: finalSlaHours,
       sla_deadline_at: deadline,
       slaDeadline: deadline,
       is_sla_breached: false,
+      isSlaBreached: false,
       attachments: safeAttachments,
       proofs: safeProofs,
       appealHistory: [],
@@ -299,9 +315,9 @@ router.post('/:id/feedback', optionalAuth, async (req, res) => {
 });
 
 // @route   POST /api/complaints/:id/reopen
-// @desc    Admin SLA Overdue Ticket Reopening with extended SLA window
-router.post('/:id/reopen', optionalAuth, reopenComplaint);
-router.post('/reopen', optionalAuth, reopenComplaint);
+// @desc    Admin SLA Overdue Ticket Reopening with extended SLA window (Admin Exclusive)
+router.post('/:id/reopen', protect, verifyAdmin, reopenComplaint);
+router.post('/reopen', protect, verifyAdmin, reopenComplaint);
 
 // @route   POST /api/complaints/:id/appeal
 // @desc    Student official appeal against resolution

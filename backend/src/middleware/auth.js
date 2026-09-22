@@ -162,3 +162,11 @@ export const restrictTo = (...roles) => {
     next();
   };
 };
+
+export const verifyAdmin = (req, res, next) => {
+  if (!req.user || req.user.role !== 'ADMIN') {
+    return res.status(403).json({ error: 'Forbidden: Only College Administrators have authority to perform this action.' });
+  }
+  next();
+};
+

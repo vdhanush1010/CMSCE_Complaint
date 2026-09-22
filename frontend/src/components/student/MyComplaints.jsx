@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Eye, X, Clock, AlertTriangle, ShieldCheck, RefreshCw, Sparkles, Calendar, ArrowRight } from 'lucide-react';
 import apiClient from '../../api/client';
+import SlaTimer from '../common/SlaTimer';
 
 export default function MyComplaints({ onSelectTicket }) {
   const [complaints, setComplaints] = useState([]);
@@ -10,7 +11,8 @@ export default function MyComplaints({ onSelectTicket }) {
   const fetchMyComplaints = async () => {
     setLoading(true);
     try {
-      const data = await apiClient.complaints.list();
+      // Use dedicated student endpoint which preserves unmasked student info with anonymous badge
+      const data = await apiClient.complaints.getMyComplaints().catch(() => apiClient.complaints.list());
       if (Array.isArray(data)) {
         setComplaints(data);
       }
@@ -96,6 +98,12 @@ export default function MyComplaints({ onSelectTicket }) {
                     <span className={`px-2 py-0.5 text-[10px] font-black rounded-full uppercase ${getPriorityStyle(item.priority)}`}>
                       {item.priority}
                     </span>
+                    {(item.isAnonymous || item.is_anonymous) && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-black rounded-full uppercase bg-purple-100 text-purple-800 border border-purple-200 shadow-xs" title="Submitted with Anonymous Identity Masking">
+                        <ShieldCheck className="w-3 h-3 text-purple-600" />
+                        Anonymous Filing
+                      </span>
+                    )}
                     <span className="text-xs font-bold text-slate-500">{item.category}</span>
                     <span className="text-[11px] text-slate-400">
                       • {item.assigned_department_name || item.department}
@@ -106,7 +114,8 @@ export default function MyComplaints({ onSelectTicket }) {
                   </h3>
                 </div>
 
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3">
+                  <SlaTimer complaint={item} compact={true} />
                   <span className="px-2.5 py-1 bg-blue-50 text-blue-800 text-xs font-bold rounded-lg border border-blue-100">
                     {item.status}
                   </span>
@@ -141,13 +150,19 @@ export default function MyComplaints({ onSelectTicket }) {
             {/* Modal Header */}
             <div className="bg-slate-900 text-white p-5 flex items-start justify-between">
               <div>
-                <div className="flex items-center gap-2 mb-1.5">
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                   <span className="font-mono text-xs font-black text-emerald-400 bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30">
                     #{quickViewComplaint.ticket_id}
                   </span>
                   <span className={`px-2 py-0.5 text-[10px] font-black rounded-full uppercase ${getPriorityStyle(quickViewComplaint.priority)}`}>
                     {quickViewComplaint.priority}
                   </span>
+                  {(quickViewComplaint.isAnonymous || quickViewComplaint.is_anonymous) && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-black rounded-full uppercase bg-purple-500/30 text-purple-200 border border-purple-400/40">
+                      <ShieldCheck className="w-3 h-3 text-purple-300" />
+                      Anonymous Filing
+                    </span>
+                  )}
                   <span className="px-2 py-0.5 bg-white/10 text-slate-200 text-[10px] font-bold rounded">
                     {quickViewComplaint.status}
                   </span>
@@ -169,8 +184,8 @@ export default function MyComplaints({ onSelectTicket }) {
             {/* Modal Body */}
             <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
               
-              {/* Submission Metadata */}
-              <div className="flex items-center justify-between text-xs text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-100">
+              {/* Submission Metadata & Live SLA Timer */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500 bg-slate-50 p-3 rounded-xl border border-slate-100">
                 <div className="flex items-center gap-1.5">
                   <Calendar className="w-3.5 h-3.5 text-slate-400" />
                   <span>
@@ -185,9 +200,9 @@ export default function MyComplaints({ onSelectTicket }) {
                     </strong>
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-slate-400" />
-                  <span>SLA: <strong>{quickViewComplaint.priority?.toUpperCase() === 'CRITICAL' ? 'CRITICAL: 12 Hours' : 'HIGH / MEDIUM / LOW: 48 Hours'}</strong></span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-slate-400">Live SLA:</span>
+                  <SlaTimer complaint={quickViewComplaint} compact={true} />
                 </div>
               </div>
 

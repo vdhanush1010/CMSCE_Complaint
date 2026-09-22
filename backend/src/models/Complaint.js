@@ -93,6 +93,10 @@ const complaintSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    isAnonymous: {
+      type: Boolean,
+      default: false
+    },
     studentId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Student'
@@ -105,9 +109,25 @@ const complaintSchema = new mongoose.Schema(
       type: String,
       default: 'Student'
     },
+    studentName: {
+      type: String,
+      default: 'Student'
+    },
     student_roll: {
       type: String,
       default: '2026-STU'
+    },
+    rollNo: {
+      type: String,
+      default: '2026-STU'
+    },
+    student_email: {
+      type: String,
+      default: ''
+    },
+    studentEmail: {
+      type: String,
+      default: ''
     },
     ai_confidence_score: {
       type: Number,
@@ -283,6 +303,34 @@ complaintSchema.pre('save', function (next) {
     this.student = this.studentId;
   }
 
+  // Synchronize anonymous flags
+  if (this.isAnonymous !== undefined && this.is_anonymous === undefined) {
+    this.is_anonymous = Boolean(this.isAnonymous);
+  } else if (this.is_anonymous !== undefined && this.isAnonymous === undefined) {
+    this.isAnonymous = Boolean(this.is_anonymous);
+  } else if (this.isAnonymous !== undefined) {
+    this.is_anonymous = Boolean(this.isAnonymous);
+  }
+
+  // Synchronize student display names and rolls
+  if (this.studentName && !this.student_name) {
+    this.student_name = this.studentName;
+  } else if (this.student_name && !this.studentName) {
+    this.studentName = this.student_name;
+  }
+
+  if (this.rollNo && !this.student_roll) {
+    this.student_roll = this.rollNo;
+  } else if (this.student_roll && !this.rollNo) {
+    this.rollNo = this.student_roll;
+  }
+
+  if (this.studentEmail && !this.student_email) {
+    this.student_email = this.studentEmail;
+  } else if (this.student_email && !this.studentEmail) {
+    this.studentEmail = this.student_email;
+  }
+
   // Synchronize resolutionNotes and resolution_notes
   if (this.resolutionNotes && !this.resolution_notes) {
     this.resolution_notes = this.resolutionNotes;
@@ -328,7 +376,7 @@ complaintSchema.pre('save', function (next) {
 
   const effectiveDeadline = this.slaDeadline || this.sla_deadline_at;
   if (effectiveDeadline) {
-    const isPast = new Date() > new Date(effectiveDeadline) && !['Resolved', 'Closed', 'RESOLVED'].includes(this.status);
+    const isPast = new Date() > new Date(effectiveDeadline) && !['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(this.status);
     this.is_sla_breached = isPast;
     this.isSlaBreached = isPast;
   }

@@ -174,7 +174,8 @@ export default function ComplaintDesk({ user, onTicketCreated }) {
       const data = await apiClient.complaints.create({
         title: title.trim(),
         description: description.trim(),
-        is_anonymous: isAnonymous,
+        isAnonymous: Boolean(isAnonymous),
+        is_anonymous: Boolean(isAnonymous),
         category: aiResult?.category || 'General Grievance',
         department: targetDept,
         priority: targetPriority,

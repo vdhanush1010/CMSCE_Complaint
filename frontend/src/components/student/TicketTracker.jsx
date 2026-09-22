@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Clock, 
   ShieldAlert, 
+  ShieldCheck,
   CheckCircle, 
   CheckCircle2, 
   ArrowLeft, 
@@ -18,6 +19,7 @@ import {
 } from 'lucide-react';
 import FeedbackCard from './FeedbackCard';
 import apiClient from '../../api/client';
+import SlaTimer from '../common/SlaTimer';
 
 const STAGES_6 = [
   { key: 'SUBMITTED',            label: '1. Submitted' },
@@ -299,7 +301,11 @@ export default function TicketTracker({ ticketId = '', onBack }) {
                   : 'bg-blue-50 text-blue-800 border-blue-100'
               }`}>
                 {complaint.status}
-              </span>
+              </span>              {(complaint.isAnonymous || complaint.is_anonymous) && (
+                <span className="px-2.5 py-1 text-xs font-black rounded-full uppercase bg-purple-100 text-purple-800 border border-purple-200 shadow-xs flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-purple-600" /> Anonymous Filing
+                </span>
+              )}
 
               {appealCycle > 0 && (
                 <span className="px-2.5 py-1 bg-amber-500 text-white text-xs font-black rounded-full shadow-xs flex items-center gap-1">
@@ -316,27 +322,11 @@ export default function TicketTracker({ ticketId = '', onBack }) {
           </div>
 
           {/* Real-time Live SLA Countdown */}
-          <div className={`p-4 rounded-xl shadow-lg border min-w-[210px] text-center ${
-            isAppealed
-              ? 'bg-amber-950 text-amber-100 border-amber-800/80'
-              : isReopenedTicket
-              ? 'bg-amber-950 text-amber-100 border-amber-800/80'
-              : 'bg-slate-900 text-white border-slate-800'
-          }`}>
-            <div className="flex items-center justify-center gap-1.5 text-xs font-bold uppercase tracking-wider mb-1 text-amber-400">
-              <Clock className="w-4 h-4 animate-pulse" /> 
-              {isAppealed ? 'Appeal Re-investigation SLA' : isReopenedTicket ? 'Extended SLA Countdown' : 'Live SLA Countdown'}
-            </div>
-            <div className="font-mono text-2xl font-black text-white">
-              {String(timeLeft.hours).padStart(2, '0')}:{String(timeLeft.minutes).padStart(2, '0')}:{String(timeLeft.seconds).padStart(2, '0')}
-            </div>
-            <span className="text-[10px] text-slate-300 block mt-0.5">
-              {timeLeft.isExpired 
-                ? 'SLA Deadline Expired' 
-                : complaint.priority?.toUpperCase() === 'CRITICAL'
-                ? 'Target: CRITICAL: 12 Hours'
-                : 'Target: HIGH / MEDIUM / LOW: 48 Hours'}
+          <div className="flex flex-col items-center md:items-end justify-center">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+              {isAppealed ? 'Appeal Re-investigation SLA' : isReopenedTicket ? 'Extended SLA Window' : 'Live SLA Window'}
             </span>
+            <SlaTimer complaint={complaint} showSeconds={true} />
           </div>
         </div>
 

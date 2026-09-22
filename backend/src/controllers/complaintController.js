@@ -40,7 +40,7 @@ export async function reopenComplaint(req, res) {
     const isOverdue = Boolean(
       complaint.is_sla_breached ||
       complaint.isSlaBreached ||
-      ((complaint.slaDeadline || complaint.sla_deadline_at) && now > new Date(complaint.slaDeadline || complaint.sla_deadline_at) && !['Resolved', 'Closed', 'RESOLVED'].includes(complaint.status))
+      ((complaint.slaDeadline || complaint.sla_deadline_at || complaint.slaExtendedUntil) && now > new Date(complaint.slaExtendedUntil || complaint.slaDeadline || complaint.sla_deadline_at) && !['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(complaint.status))
     );
     const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED', 'APPEALED'].includes(complaint.status);
 
@@ -57,8 +57,9 @@ export async function reopenComplaint(req, res) {
     const reasonText = reopenReason.trim();
     const oldStatus = complaint.status;
 
-    // Update status and SLA tracking
-    complaint.status = 'REOPENED';
+    // Update status and SLA tracking: reset to IN_PROGRESS and unlock workflow
+    complaint.status = 'IN_PROGRESS';
+    complaint.stage = 'IN_PROGRESS';
     complaint.isReopened = true;
     complaint.reopenReason = reasonText;
     complaint.is_sla_breached = false;
@@ -72,9 +73,11 @@ export async function reopenComplaint(req, res) {
       complaint.timeline = [];
     }
 
-    // Append entry into timeline
+    // Append audit entry into timeline with REOPENED_BY_ADMIN action
     complaint.timeline.push({
-      status: 'REOPENED',
+      action: 'REOPENED_BY_ADMIN',
+      message: `Re-opened by Admin (+${extHours}h extension)`,
+      status: 'IN_PROGRESS',
       changedBy: adminName,
       role: 'ADMIN',
       remarks: reasonText,
@@ -88,7 +91,7 @@ export async function reopenComplaint(req, res) {
     // Append entry into history
     complaint.history.push({
       old_status: oldStatus,
-      new_status: 'REOPENED',
+      new_status: 'IN_PROGRESS',
       changed_by_name: adminName,
       remarks: `Re-opened by Admin (+${extHours}h SLA extension): ${reasonText}`,
       timestamp: now
@@ -121,24 +124,62 @@ export async function reopenComplaint(req, res) {
  * List complaints with role-based scoping and unpolluted Admin visibility
  * GET /api/complaints/
  */
+/**
+ * Helper to format complaint output with SLA breach calculation and anonymous masking
+ */
+export function formatComplaintResponse(item, now = new Date(), maskAnonymous = false) {
+  const deadline = item.slaExtendedUntil || item.slaDeadline || item.sla_deadline_at;
+  const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(item.status) || item.stage === 'RESOLVED';
+  const isBreached = deadline ? (now > new Date(deadline) && !isResolved) : false;
+  
+  const raw = item.toJSON ? item.toJSON() : { ...item };
+  const isAnon = Boolean(raw.isAnonymous || raw.is_anonymous);
+
+  const resObj = {
+    ...raw,
+    id: raw._id || raw.id,
+    isAnonymous: isAnon,
+    is_anonymous: isAnon,
+    slaDeadline: deadline,
+    sla_deadline_at: deadline,
+    is_sla_breached: isBreached,
+    isSlaBreached: isBreached
+  };
+
+  if (maskAnonymous && isAnon) {
+    resObj.studentName = 'Anonymous Student';
+    resObj.student_name = 'Anonymous Student';
+    resObj.studentEmail = 'Hidden';
+    resObj.student_email = 'Hidden';
+    resObj.rollNo = 'Hidden';
+    resObj.studentRoll = 'Hidden';
+    resObj.student_roll = 'Hidden';
+    if (resObj.student && typeof resObj.student === 'object') {
+      resObj.student = {
+        ...resObj.student,
+        name: 'Anonymous Student',
+        full_name: 'Anonymous Student',
+        email: 'Hidden',
+        rollNo: 'Hidden',
+        roll_number: 'Hidden'
+      };
+    }
+  }
+
+  return resObj;
+}
+
+/**
+ * List complaints with role-based scoping and unpolluted Admin visibility
+ * Masks anonymous submission identity for Department Staff and College Admin
+ * GET /api/complaints/
+ */
 export async function getComplaints(req, res) {
   try {
     const { department, status, stage, search, student_id } = req.query;
+    const now = new Date();
 
-    const mapComplaint = (item, now) => {
-      const deadline = item.slaExtendedUntil || item.sla_deadline_at;
-      const isBreached = deadline 
-        ? now > new Date(deadline) && !['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(item.status)
-        : false;
-      return {
-        ...item.toJSON(),
-        id: item._id,
-        is_sla_breached: isBreached
-      };
-    };
-
-    // 1. Role is ADMIN: Admins MUST see all complaints unconditionally
-    // Ignore any lingering department context or req.user.department
+    // 1. Role is ADMIN: Admins see all complaints (with anonymous submissions masked)
     if (req.user && req.user.role === 'ADMIN') {
       const filter = (department && department !== 'ALL' && department !== 'all')
         ? {
@@ -172,12 +213,11 @@ export async function getComplaints(req, res) {
       }
 
       const complaints = await Complaint.find(filter).sort({ createdAt: -1 });
-      const now = new Date();
-      const formatted = complaints.map(c => mapComplaint(c, now));
+      const formatted = complaints.map(c => formatComplaintResponse(c, now, true));
       return res.json({ success: true, complaints: formatted });
     }
 
-    // 2. Role is DEPARTMENT_HEAD: Filter strictly by their assigned department
+    // 2. Role is DEPARTMENT_HEAD / STAFF: Filter strictly by their assigned department (masked)
     if (req.user && (req.user.role === 'DEPARTMENT_HEAD' || req.user.role === 'DEPT_HEAD' || req.user.role === 'STAFF')) {
       const deptCode = (req.user.departmentCode || req.user.department || '').toUpperCase();
       const filter = {
@@ -210,12 +250,11 @@ export async function getComplaints(req, res) {
       }
 
       const complaints = await Complaint.find(filter).sort({ createdAt: -1 });
-      const now = new Date();
-      const formatted = complaints.map(c => mapComplaint(c, now));
+      const formatted = complaints.map(c => formatComplaintResponse(c, now, true));
       return res.json({ success: true, complaints: formatted });
     }
 
-    // 3. Role is STUDENT or fallback unauthenticated
+    // 3. Fallback / Public filtering (masks anonymous)
     const filter = {};
     if (req.user && req.user.role === 'STUDENT' && !department && !search) {
       filter.$or = [{ student: req.user._id }, { studentId: req.user._id }];
@@ -241,12 +280,37 @@ export async function getComplaints(req, res) {
     }
 
     const complaints = await Complaint.find(filter).sort({ createdAt: -1 });
-    const now = new Date();
-    const formatted = complaints.map(c => mapComplaint(c, now));
+    const isStudentOwn = Boolean(req.user && req.user.role === 'STUDENT' && !department);
+    const formatted = complaints.map(c => formatComplaintResponse(c, now, !isStudentOwn));
     return res.json({ success: true, complaints: formatted });
   } catch (err) {
     console.error('[Get Complaints Error]:', err);
     return res.status(500).json({ error: 'Failed to retrieve complaints', detail: err.message });
+  }
+}
+
+/**
+ * Logged-in Student Grievances: Does NOT mask student details
+ * Returns original student information with isAnonymous: true so they can identify their submission
+ * GET /api/complaints/my
+ */
+export async function getMyComplaints(req, res) {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({ error: 'Authentication required to view your complaints.' });
+    }
+
+    const complaints = await Complaint.find({
+      $or: [{ student: req.user._id }, { studentId: req.user._id }]
+    }).sort({ createdAt: -1 });
+
+    const now = new Date();
+    // Do NOT mask: maskAnonymous = false
+    const formatted = complaints.map(c => formatComplaintResponse(c, now, false));
+    return res.json({ success: true, complaints: formatted });
+  } catch (err) {
+    console.error('[Get My Complaints Error]:', err);
+    return res.status(500).json({ error: 'Failed to retrieve your complaints', detail: err.message });
   }
 }
 
@@ -503,6 +567,23 @@ export async function updateStatus(req, res) {
     const changerName = req.user?.name || req.user?.email || 'Department Staff';
     const changerRole = req.user?.role || 'STAFF';
     const isAdmin = req.user && req.user.role === 'ADMIN';
+
+    // SLA Expiry Lock: When a ticket breaches SLA (new Date() > complaint.slaDeadline and status !== 'RESOLVED'),
+    // lock department staff progression: return 403 Forbidden: "SLA time expired. Action locked pending Admin intervention."
+    const now = new Date();
+    const effectiveDeadline = complaint.slaExtendedUntil || complaint.slaDeadline || complaint.sla_deadline_at;
+    const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(complaint.status) || complaint.stage === 'RESOLVED';
+    const isOverdue = effectiveDeadline ? (now > new Date(effectiveDeadline) && !isResolved) : false;
+    const isBreached = Boolean(complaint.is_sla_breached || complaint.isSlaBreached || isOverdue);
+
+    if (!isAdmin && isBreached) {
+      return res.status(403).json({
+        success: false,
+        error: 'SLA time expired. Action locked pending Admin intervention.',
+        message: 'SLA time expired. Action locked pending Admin intervention.'
+      });
+    }
+
 
     // Normalize target stage & status interchangeably
     const rawInput = (stage || status || '').trim();

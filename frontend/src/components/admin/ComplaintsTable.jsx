@@ -1,5 +1,6 @@
 import React from 'react';
-import { AlertCircle, Clock, Star, Scale, Eye, CheckCircle2 } from 'lucide-react';
+import { AlertCircle, Clock, Star, Scale, Eye, CheckCircle2, ShieldCheck } from 'lucide-react';
+import SlaTimer from '../common/SlaTimer';
 
 export default function ComplaintsTable({ 
   complaints = [], 
@@ -186,6 +187,12 @@ export default function ComplaintsTable({
                       <div className="text-xs text-slate-500 truncate" title={complaint.description}>
                         {complaint.description}
                       </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5">
+                        <span>Student: <strong className="text-slate-600 font-semibold">{complaint.studentName || 'Student User'}</strong></span>
+                        {(complaint.isAnonymous || complaint.is_anonymous || complaint.studentName === 'Anonymous Student') && (
+                          <span className="px-1.5 py-0.2 bg-purple-100 text-purple-700 text-[9px] font-bold rounded">Anonymous</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-5 py-3.5 font-medium text-slate-700 text-xs">
                       {getDeptLabel(complaint.assignedDept)}
@@ -199,7 +206,7 @@ export default function ComplaintsTable({
                       {getStageBadge(complaint.stage, complaint.status)}
                     </td>
                     <td className="px-5 py-3.5">
-                      {getSLATimerBadge(complaint.slaHoursLeft, complaint.isSlaOverdue, complaint.priority)}
+                      <SlaTimer complaint={complaint} compact={true} />
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       <div className="inline-flex items-center gap-2 justify-end">

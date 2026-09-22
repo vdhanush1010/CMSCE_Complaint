@@ -28,15 +28,16 @@ router.get('/dashboard', optionalAuth, async (req, res) => {
     let totalResolutionHours = 0;
 
     allComplaints.forEach((c) => {
-      const isResolved = ['Resolved', 'Closed'].includes(c.status);
-      const isBreached = c.sla_deadline_at ? now > new Date(c.sla_deadline_at) && !isResolved : false;
+      const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(c.status) || c.stage === 'RESOLVED';
+      const deadline = c.slaExtendedUntil || c.slaDeadline || c.sla_deadline_at;
+      const isBreached = deadline ? now > new Date(deadline) && !isResolved : false;
 
       if (!isResolved) {
         totalOpen++;
-        if (c.priority === 'CRITICAL') {
+        if ((c.priority || '').toUpperCase() === 'CRITICAL') {
           criticalEscalations++;
         }
-        if (isBreached || c.is_sla_breached) {
+        if (isBreached || c.is_sla_breached || c.isSlaBreached) {
           slaBreaches++;
         }
       } else {
