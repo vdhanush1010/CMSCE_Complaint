@@ -4,8 +4,8 @@
   "description": "CMSCE AI-Powered Complaint Management System Backend Engine",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
+    "start": "node --max-old-space-size=400 server.js",
+    "dev": "node --max-old-space-size=400 --watch server.js",
     "seed": "node src/scripts/seed.js"
   },
   "type": "module",
@@ -16,7 +16,9 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.9.2"
+    "mongoose": "^8.9.2",
+    "multer": "^2.4.0",
+    "node-cron": "^4.6.0"
   },
   "keywords": [
     "complaint-management",

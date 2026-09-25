@@ -31,9 +31,9 @@ export default function ComplaintDesk({ user, onTicketCreated }) {
         return;
       }
 
-      // 8MB max size check per file
-      if (file.size > 8 * 1024 * 1024) {
-        setErrorMsg(`File ${file.name} is too large. Maximum size allowed is 8MB.`);
+      // Strict 5MB max size check per file to avoid high memory spikes
+      if (file.size > 5 * 1024 * 1024) {
+        setErrorMsg(`File ${file.name} is too large. Maximum size allowed is 5MB.`);
         return;
       }
 

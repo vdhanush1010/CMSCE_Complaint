@@ -31,10 +31,23 @@ export default function SlaTimer({
   const getTargetDeadline = () => {
     if (explicitDeadline) return new Date(explicitDeadline).getTime();
     if (comp.slaExtendedUntil) return new Date(comp.slaExtendedUntil).getTime();
-    if (comp.slaDeadline) return new Date(comp.slaDeadline).getTime();
-    if (comp.sla_deadline_at) return new Date(comp.sla_deadline_at).getTime();
 
+    const rawDeadline = comp.slaDeadline || comp.sla_deadline_at;
     const createdTime = explicitCreatedAt || comp.createdAt;
+
+    if (rawDeadline) {
+      const deadlineTime = new Date(rawDeadline).getTime();
+      // If priority is non-critical (HIGH / MEDIUM / LOW), ensure 12h bug doesn't trigger premature breach
+      if (priority !== 'CRITICAL' && createdTime) {
+        const createdMs = new Date(createdTime).getTime();
+        const diffHours = (deadlineTime - createdMs) / 3600000;
+        if (diffHours < 24) {
+          return createdMs + 48 * 3600000;
+        }
+      }
+      return deadlineTime;
+    }
+
     if (createdTime) {
       return new Date(createdTime).getTime() + targetHours * 3600000;
     }

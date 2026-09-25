@@ -18,7 +18,11 @@ const router = express.Router();
  */
 router.get('/dashboard', optionalAuth, async (req, res) => {
   try {
-    const allComplaints = await Complaint.find();
+    // Lean projected query omitting heavy attachment/proof buffers to conserve Render RAM
+    const allComplaints = await Complaint.find(
+      {},
+      'status stage priority slaExtendedUntil slaDeadline sla_deadline_at is_sla_breached isSlaBreached createdAt updatedAt history.new_status history.timestamp'
+    ).lean();
     const now = new Date();
 
     let totalOpen = 0;

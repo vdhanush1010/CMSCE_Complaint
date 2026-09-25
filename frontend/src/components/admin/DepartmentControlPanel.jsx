@@ -144,8 +144,8 @@ export default function DepartmentControlPanel({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 12 * 1024 * 1024) {
-      setApiError('File size exceeds 12MB limit. Please upload a smaller photo or document.');
+    if (file.size > 5 * 1024 * 1024) {
+      setApiError('File size exceeds 5MB limit. Please upload a smaller photo or document.');
       return;
     }
 

@@ -141,6 +141,10 @@ const complaintSchema = new mongoose.Schema(
       type: Number,
       default: 48
     },
+    slaTargetHours: {
+      type: Number,
+      default: 48
+    },
     sla_deadline_at: {
       type: Date
     },
@@ -260,6 +264,29 @@ const complaintSchema = new mongoose.Schema(
   }
 );
 
+// Indexing for high-performance querying and minimal RAM/CPU footprint on Render
+complaintSchema.index({ studentEmail: 1 });
+complaintSchema.index({ student_email: 1 });
+complaintSchema.index({ department: 1 });
+complaintSchema.index({ departmentCode: 1 });
+complaintSchema.index({ assigned_department_code: 1 });
+complaintSchema.index({ status: 1 });
+complaintSchema.index({ stage: 1 });
+complaintSchema.index({ priority: 1 });
+complaintSchema.index({ student: 1 });
+complaintSchema.index({ studentId: 1 });
+complaintSchema.index({ createdAt: -1 });
+complaintSchema.index({ is_sla_breached: 1 });
+complaintSchema.index({ isSlaBreached: 1 });
+complaintSchema.index({ slaDeadline: 1 });
+complaintSchema.index({ sla_deadline_at: 1 });
+
+// Compound indexes for frequent composite query patterns
+complaintSchema.index({ department: 1, status: 1, createdAt: -1 });
+complaintSchema.index({ departmentCode: 1, status: 1, createdAt: -1 });
+complaintSchema.index({ student: 1, createdAt: -1 });
+complaintSchema.index({ studentEmail: 1, createdAt: -1 });
+
 // Helper to map status to 6-stage format
 const STATUS_TO_STAGE = {
   'Submitted': 'SUBMITTED',
@@ -347,17 +374,32 @@ complaintSchema.pre('save', function (next) {
 
   // SLA hour mapping & deadline calculation:
   // Strictly: CRITICAL = 12h, all other priorities (HIGH, MEDIUM, LOW) = 48h
-  const targetSlaHours = getSlaHours(this.priority);
-  if (!this.sla_hours || this.isModified('priority')) {
-    this.sla_hours = targetSlaHours;
-  }
+  const priority = (this.priority || 'MEDIUM').toUpperCase().trim();
+  const slaHours = (priority === 'CRITICAL') ? 12 : 48;
+  this.sla_hours = slaHours;
+  this.slaTargetHours = slaHours;
 
-  // Calculate slaDeadline: new Date(baseTime + hours * 60 * 60 * 1000)
+  const baseTime = this.createdAt || Date.now();
+  const calculatedDeadline = calculateSlaDeadline(slaHours, baseTime);
+
+  // Calculate slaDeadline: ensure non-critical complaints never have 12h deadline
   if ((!this.sla_deadline_at && !this.slaDeadline) || this.isModified('priority')) {
-    const baseTime = this.createdAt || Date.now();
-    const deadline = calculateSlaDeadline(this.sla_hours, baseTime);
-    this.slaDeadline = deadline;
-    this.sla_deadline_at = deadline;
+    this.slaDeadline = calculatedDeadline;
+    this.sla_deadline_at = calculatedDeadline;
+  } else if (priority !== 'CRITICAL' && (this.slaDeadline || this.sla_deadline_at)) {
+    const existingDeadline = this.slaDeadline || this.sla_deadline_at;
+    const existingDiffHours = (new Date(existingDeadline).getTime() - new Date(baseTime).getTime()) / (60 * 60 * 1000);
+    // If deadline was incorrectly assigned <= 24 hours (12h bug), correct it to 48 hours
+    if (existingDiffHours < 24) {
+      this.slaDeadline = calculatedDeadline;
+      this.sla_deadline_at = calculatedDeadline;
+    } else {
+      if (this.sla_deadline_at && !this.slaDeadline) {
+        this.slaDeadline = this.sla_deadline_at;
+      } else if (this.slaDeadline && !this.sla_deadline_at) {
+        this.sla_deadline_at = this.slaDeadline;
+      }
+    }
   } else {
     // Keep slaDeadline and sla_deadline_at synchronized
     if (this.sla_deadline_at && !this.slaDeadline) {

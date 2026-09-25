@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import { Complaint } from '../models/Complaint.js';
 import { Department } from '../models/Department.js';
+import { triageComplaint, getHeuristicTriage } from '../services/aiTriageService.js';
+import { getSlaHours, calculateSlaDeadline } from '../services/slaService.js';
 
 /**
  * Re-open an SLA breached or prematurely resolved grievance with custom SLA extension
@@ -125,19 +127,59 @@ export async function reopenComplaint(req, res) {
  * GET /api/complaints/
  */
 /**
- * Helper to format complaint output with SLA breach calculation and anonymous masking
+ * Helper to generate human-readable unique ticket IDs like CMP-1045
+ */
+export async function generateUniqueTicketId() {
+  const count = await Complaint.countDocuments();
+  const seedNum = 1040 + count + 1;
+  const candidate = `CMP-${seedNum}`;
+  const exists = await Complaint.findOne({ ticket_id: candidate });
+  if (exists) {
+    return `CMP-${Math.floor(1000 + Math.random() * 9000)}`;
+  }
+  return candidate;
+}
+
+/**
+ * Helper to format complaint output with SLA breach calculation and anonymous masking.
+ * Ensures non-critical complaints always receive 48h target window.
  */
 export function formatComplaintResponse(item, now = new Date(), maskAnonymous = false) {
-  const deadline = item.slaExtendedUntil || item.slaDeadline || item.sla_deadline_at;
-  const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(item.status) || item.stage === 'RESOLVED';
-  const isBreached = deadline ? (now > new Date(deadline) && !isResolved) : false;
-  
+  if (!item) return null;
   const raw = item.toJSON ? item.toJSON() : { ...item };
+  const priority = (raw.priority || 'MEDIUM').toUpperCase().trim();
+  const slaTargetHours = raw.slaTargetHours || (priority === 'CRITICAL' ? 12 : 48);
+
+  // Compute effective deadline, correcting 12h bug if present on non-critical complaints
+  let deadline = raw.slaExtendedUntil;
+  if (!deadline) {
+    const rawDeadline = raw.slaDeadline || raw.sla_deadline_at;
+    const createdAt = raw.createdAt ? new Date(raw.createdAt) : null;
+    if (rawDeadline && createdAt && priority !== 'CRITICAL') {
+      const diffHours = (new Date(rawDeadline).getTime() - createdAt.getTime()) / (60 * 60 * 1000);
+      if (diffHours < 24) {
+        // Automatically restore 48h deadline for non-critical tickets
+        deadline = new Date(createdAt.getTime() + 48 * 60 * 60 * 1000);
+      } else {
+        deadline = rawDeadline;
+      }
+    } else if (rawDeadline) {
+      deadline = rawDeadline;
+    } else if (createdAt) {
+      deadline = new Date(createdAt.getTime() + slaTargetHours * 60 * 60 * 1000);
+    }
+  }
+
+  const isResolved = ['Resolved', 'Closed', 'RESOLVED', 'CLOSED'].includes(raw.status) || raw.stage === 'RESOLVED';
+  const isBreached = deadline ? (now > new Date(deadline) && !isResolved) : false;
   const isAnon = Boolean(raw.isAnonymous || raw.is_anonymous);
 
   const resObj = {
     ...raw,
     id: raw._id || raw.id,
+    priority: priority,
+    sla_hours: slaTargetHours,
+    slaTargetHours: slaTargetHours,
     isAnonymous: isAnon,
     is_anonymous: isAnon,
     slaDeadline: deadline,
@@ -170,6 +212,166 @@ export function formatComplaintResponse(item, now = new Date(), maskAnonymous = 
 }
 
 /**
+ * Submit a new grievance ticket with automatic AI triage and SLA deadline computation
+ * POST /api/complaints/
+ */
+export async function createComplaint(req, res) {
+  try {
+    const {
+      title,
+      description,
+      category,
+      department,
+      priority,
+      is_anonymous,
+      ai_confidence_score,
+      ai_routing_reasoning,
+      proofs,
+      attachments
+    } = req.body;
+
+    if (!title || !description) {
+      return res.status(400).json({ error: 'Title and description are required' });
+    }
+
+    // Run AI triage if department or priority are not finalized
+    let finalDept = department;
+    let finalDeptName = 'Canteen Operations';
+    let finalPriority = priority;
+    let finalCategory = category;
+    let finalConfidence = ai_confidence_score;
+    let finalReasoning = ai_routing_reasoning;
+
+    if (!finalDept || !finalPriority) {
+      try {
+        const aiResult = await triageComplaint({ title, description, category_hint: category });
+        if (aiResult.isValid === false) {
+          return res.status(400).json({
+            isValid: false,
+            error: aiResult.reasoning || 'The provided text does not contain a coherent or actionable campus grievance. Please provide specific details.',
+            detail: 'Invalid or non-grievance text detected.'
+          });
+        }
+        finalDept = aiResult.assigned_dept_code;
+        finalDeptName = aiResult.department_name;
+        finalPriority = aiResult.priority;
+        finalCategory = finalCategory || aiResult.category;
+        finalConfidence = aiResult.ai_confidence_score;
+        finalReasoning = aiResult.reasoning;
+      } catch (aiErr) {
+        console.warn('[Complaint Create] AI triage error during complaint creation, falling back to heuristics:', aiErr.message);
+        const fallback = getHeuristicTriage({ title, description, category_hint: category });
+        finalDept = fallback.assigned_dept_code;
+        finalDeptName = fallback.department_name;
+        finalPriority = fallback.priority;
+        finalCategory = finalCategory || fallback.category;
+        finalConfidence = fallback.ai_confidence_score;
+        finalReasoning = fallback.reasoning;
+      }
+    } else {
+      const deptDoc = await Department.findOne({ code: finalDept.toUpperCase() });
+      if (deptDoc) {
+        finalDeptName = deptDoc.name;
+      }
+    }
+
+    // Backend Deadline Calculation:
+    // When creating a complaint, strictly calculate 12h for CRITICAL, 48h for all other priorities
+    const normPriority = (req.body.priority || finalPriority || 'MEDIUM').toUpperCase().trim();
+    const slaHours = (normPriority === 'CRITICAL') ? 12 : 48;
+    const now = new Date();
+    const slaDeadline = new Date(now.getTime() + slaHours * 60 * 60 * 1000);
+
+    const ticket_id = await generateUniqueTicketId();
+
+    const isAnonymous = Boolean(req.body.isAnonymous !== undefined ? req.body.isAnonymous : req.body.is_anonymous);
+    const studentName = req.user ? (req.user.name || req.user.full_name || 'Student User') : 'Student User';
+    const studentRoll = req.user ? (req.user.rollNo || req.user.roll_number || '2026-STU') : '2026-STU';
+    const studentEmail = req.user ? (req.user.email || '') : '';
+
+    const safeAttachments = Array.isArray(attachments) ? attachments : [];
+    const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+    for (const a of safeAttachments) {
+      if (a.fileSize && a.fileSize > MAX_ATTACHMENT_BYTES) {
+        return res.status(400).json({ error: `Attachment "${a.fileName || 'file'}" exceeds maximum permitted 5MB limit.` });
+      }
+      if (typeof a.fileData === 'string' && a.fileData.length > MAX_ATTACHMENT_BYTES * 1.4) {
+        return res.status(400).json({ error: `Attachment "${a.fileName || 'file'}" exceeds maximum permitted 5MB limit.` });
+      }
+    }
+
+    const safeProofs = (Array.isArray(proofs) && proofs.length > 0)
+      ? proofs
+      : safeAttachments.map((a) => ({ fileName: a.fileName || a.name || 'Attachment', url: a.fileData || a.url || '' }));
+
+    const initialStage = finalDept ? 'AI_ANALYSED' : 'SUBMITTED';
+    const initialStatus = initialStage === 'AI_ANALYSED' ? 'AI Analysed' : 'Submitted';
+
+    const complaint = await Complaint.create({
+      ticket_id,
+      title: title.trim(),
+      description: description.trim(),
+      category: finalCategory || 'General Grievance',
+      department: finalDept.toUpperCase(),
+      departmentCode: finalDept.toUpperCase(),
+      assigned_department_code: finalDept.toUpperCase(),
+      assigned_department_name: finalDeptName,
+      priority: normPriority,
+      status: initialStatus,
+      stage: initialStage,
+      is_anonymous: isAnonymous,
+      isAnonymous: isAnonymous,
+      student: req.user ? req.user._id : undefined,
+      studentId: req.user ? req.user._id : undefined,
+      student_name: studentName,
+      studentName: studentName,
+      student_roll: studentRoll,
+      rollNo: studentRoll,
+      student_email: studentEmail,
+      studentEmail: studentEmail,
+      ai_confidence_score: finalConfidence || 95.0,
+      ai_routing_reasoning: finalReasoning || 'AI triage processed and assigned ticket.',
+      sla_hours: slaHours,
+      slaTargetHours: slaHours,
+      sla_deadline_at: slaDeadline,
+      slaDeadline: slaDeadline,
+      is_sla_breached: false,
+      isSlaBreached: false,
+      attachments: safeAttachments,
+      proofs: safeProofs,
+      appealHistory: [],
+      history: [
+        {
+          old_status: 'None',
+          new_status: initialStatus,
+          changed_by_name: studentName,
+          remarks: 'Complaint filed via Student Desk',
+          timestamp: now
+        }
+      ],
+      timeline: [
+        {
+          status: initialStatus,
+          changedBy: studentName,
+          role: 'STUDENT',
+          remarks: 'Complaint lodged by student',
+          timestamp: now
+        }
+      ]
+    });
+
+    return res.status(201).json({
+      message: 'Complaint lodged successfully',
+      ticket_id: complaint.ticket_id,
+      complaint: formatComplaintResponse(complaint, now, false)
+    });
+  } catch (err) {
+    console.error('[Create Complaint Error]:', err);
+    return res.status(500).json({ error: 'Failed to lodge complaint', detail: err.message });
+  }
+}
+
+/**
  * List complaints with role-based scoping and unpolluted Admin visibility
  * Masks anonymous submission identity for Department Staff and College Admin
  * GET /api/complaints/
@@ -178,6 +380,11 @@ export async function getComplaints(req, res) {
   try {
     const { department, status, stage, search, student_id } = req.query;
     const now = new Date();
+
+    // Standardized memory-safe pagination with 50-record default limit (max 100)
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const skip = (page - 1) * limit;
 
     // 1. Role is ADMIN: Admins see all complaints (with anonymous submissions masked)
     if (req.user && req.user.role === 'ADMIN') {
@@ -212,9 +419,14 @@ export async function getComplaints(req, res) {
         ];
       }
 
-      const complaints = await Complaint.find(filter).sort({ createdAt: -1 });
+      const complaints = await Complaint.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
       const formatted = complaints.map(c => formatComplaintResponse(c, now, true));
-      return res.json({ success: true, complaints: formatted });
+      return res.json({ success: true, count: formatted.length, page, limit, complaints: formatted });
     }
 
     // 2. Role is DEPARTMENT_HEAD / STAFF: Filter strictly by their assigned department (masked)
@@ -249,9 +461,14 @@ export async function getComplaints(req, res) {
         ];
       }
 
-      const complaints = await Complaint.find(filter).sort({ createdAt: -1 });
+      const complaints = await Complaint.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
       const formatted = complaints.map(c => formatComplaintResponse(c, now, true));
-      return res.json({ success: true, complaints: formatted });
+      return res.json({ success: true, count: formatted.length, page, limit, complaints: formatted });
     }
 
     // 3. Fallback / Public filtering (masks anonymous)
@@ -279,10 +496,15 @@ export async function getComplaints(req, res) {
       ];
     }
 
-    const complaints = await Complaint.find(filter).sort({ createdAt: -1 });
+    const complaints = await Complaint.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
     const isStudentOwn = Boolean(req.user && req.user.role === 'STUDENT' && !department);
     const formatted = complaints.map(c => formatComplaintResponse(c, now, !isStudentOwn));
-    return res.json({ success: true, complaints: formatted });
+    return res.json({ success: true, count: formatted.length, page, limit, complaints: formatted });
   } catch (err) {
     console.error('[Get Complaints Error]:', err);
     return res.status(500).json({ error: 'Failed to retrieve complaints', detail: err.message });
@@ -300,14 +522,22 @@ export async function getMyComplaints(req, res) {
       return res.status(401).json({ error: 'Authentication required to view your complaints.' });
     }
 
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const skip = (page - 1) * limit;
+
     const complaints = await Complaint.find({
       $or: [{ student: req.user._id }, { studentId: req.user._id }]
-    }).sort({ createdAt: -1 });
+    })
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
 
     const now = new Date();
     // Do NOT mask: maskAnonymous = false
     const formatted = complaints.map(c => formatComplaintResponse(c, now, false));
-    return res.json({ success: true, complaints: formatted });
+    return res.json({ success: true, count: formatted.length, complaints: formatted });
   } catch (err) {
     console.error('[Get My Complaints Error]:', err);
     return res.status(500).json({ error: 'Failed to retrieve your complaints', detail: err.message });
@@ -633,6 +863,15 @@ export async function updateStatus(req, res) {
 
       // Mandatory Resolution Proof check when resolving
       if (targetStage === 'RESOLVED' || ['Resolved', 'RESOLVED'].includes(targetStatus)) {
+        if (resolutionProof && typeof resolutionProof === 'object') {
+          if (resolutionProof.fileSize && resolutionProof.fileSize > 5 * 1024 * 1024) {
+            return res.status(400).json({ success: false, message: 'Resolution proof photo exceeds maximum permitted 5MB limit.' });
+          }
+          if (typeof resolutionProof.fileData === 'string' && resolutionProof.fileData.length > 5 * 1024 * 1024 * 1.4) {
+            return res.status(400).json({ success: false, message: 'Resolution proof photo exceeds maximum permitted 5MB limit.' });
+          }
+        }
+
         const hasIncomingProof = resolutionProof && (
           (typeof resolutionProof === 'string' && resolutionProof.trim().length > 0) ||
           (typeof resolutionProof === 'object' && resolutionProof.fileData && typeof resolutionProof.fileData === 'string' && resolutionProof.fileData.trim().length > 0) ||

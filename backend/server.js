@@ -1,7 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import { connectDB } from './src/config/db.js';
+import { initSlaCronJob, stopSlaCronJob } from './src/services/slaService.js';
 
 import authRoutes from './src/routes/authRoutes.js';
 import complaintRoutes from './src/routes/complaintRoutes.js';
@@ -25,8 +27,8 @@ app.use(
     credentials: true
   })
 );
-app.use(express.json({ limit: '15mb' }));
-app.use(express.urlencoded({ extended: true, limit: '15mb' }));
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
 
 // Request logger for development
 app.use((req, res, next) => {
@@ -81,7 +83,7 @@ app.use((err, req, res, next) => {
 });
 
 if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`
   ======================================================
   🎓 CMSCE AI-Powered Grievance Hub — Backend Engine
@@ -90,7 +92,34 @@ if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   ⚡ Health Check: http://localhost:${PORT}/api/health
   ======================================================
   `);
+    // Initialize lightweight 15-minute SLA checker cron
+    initSlaCronJob('*/15 * * * *');
   });
+
+  // Graceful shutdown handling for container environments (Render, Docker, K8s)
+  const gracefulShutdown = async (signal) => {
+    console.log(`\n[Process] Received ${signal}. Initiating graceful shutdown...`);
+    stopSlaCronJob();
+    server.close(async () => {
+      console.log('[Server] HTTP server closed.');
+      try {
+        await mongoose.connection.close(false);
+        console.log('[MongoDB] Database connection closed.');
+      } catch (err) {
+        console.error('[MongoDB] Error closing database connection:', err.message);
+      }
+      process.exit(0);
+    });
+
+    // Force exit if not gracefully closed within 10 seconds
+    setTimeout(() => {
+      console.error('[Process] Forcing shutdown after timeout.');
+      process.exit(1);
+    }, 10000).unref();
+  };
+
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 }
 
 export default app;
